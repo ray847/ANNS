@@ -15,6 +15,7 @@
  */
 class Solution {
 public:
+  using SolverT = solution::Solver<1>;
   /* Functions */
   /**
    * Load & preprocessthe vector dataset.
@@ -28,7 +29,7 @@ public:
         base_mat[i][j] = base[i + j * d];
       }
     }
-    solver_ = std::make_unique<solution::Solver>(base_mat);
+    solver_ = std::make_unique<SolverT>(base_mat);
   }
   /**
    * Search for the 10 closest vectors in the dataset.
@@ -42,7 +43,7 @@ public:
    */
   inline void search(const std::vector<float>& query, int* res) {}
 private:
-  std::unique_ptr<solution::Solver> solver_;
+  std::unique_ptr<SolverT> solver_;
 };
 static_assert(IsSolution<Solution>);
 

@@ -36,7 +36,7 @@ base, split_indicies
 '''Full Figure'''
 fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"projection": "3d"})
 
-colors = colormaps["hsv"](np.linspace(0, 1, len(split_indicies) - 1))
+colors = colormaps["nipy_spectral"](np.linspace(0, 1, len(split_indicies) - 1))
 for i in range(len(split_indicies) - 1):
     l = split_indicies[i]
     r = split_indicies[i+1]

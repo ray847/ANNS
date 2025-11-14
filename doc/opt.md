@@ -52,6 +52,16 @@ search(query):
     Look around the W vectors.
 ```
 
+## Onion Pealing
+
+1. Continue to find larges outer convex closure and group base vectors by their closures.
+2. Construct graph for every convex group.
+3. Select a single seed for every group randomly.
+
+### Potiential shortcommings and solutions
+
+* Every closure is poorly selected (too little points).
+
 ## Complexity Analysis
 
 $$\text{Vector Dimension} = d$$

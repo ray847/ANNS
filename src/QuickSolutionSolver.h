@@ -12,6 +12,7 @@
 
 namespace solution {
 
+template<size_t MAX_CLUTTER_SIZE>
 class Solver {
 public:
   /* Constructor */
@@ -65,16 +66,10 @@ private:
     quick_partion(0, n_base());
   }
   inline void quick_partion(size_t st, size_t ed) {
-    if (ed - st <= 1) {
-      //std::clog << ed - st << '\n';
-      return;
-    }
+    if (ed - st <= MAX_CLUTTER_SIZE) return;
     auto plane = select_pivot(st, ed);
     size_t mid = partion(st, ed, plane);
-    if (st == mid || ed == mid) {
-      //std::clog << ed - st << '\n';
-      return;
-    }
+    if (st == mid || ed == mid) return;
     planes_.insert({mid, plane});
     /* Recursion */
     quick_partion(st, mid);
