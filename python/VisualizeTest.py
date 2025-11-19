@@ -4,6 +4,7 @@
 # %%
 import matplotlib.pyplot as plt
 from matplotlib import colormaps
+from mpl_toolkits.mplot3d.art3d import Line3DCollection
 import numpy as np
 from math import ceil
 
@@ -13,21 +14,27 @@ from math import ceil
 # %%
 '''Load base vectors.'''
 base = []
-with open("../base_sorted.txt", 'r') as f:
+with open("../tmp/base_sorted.txt", 'r') as f:
     for line in f:
         line = line.strip().split(' ')
         base.append([float(i) for i in line])
 base = np.array(base)
 
-'''Load split indicies.'''
-split_indicies = [0]
-with open("../split_indicies.txt", 'r') as f:
+'''Load groupings.'''
+grouping = []
+with open("../tmp/grouping.txt", 'r') as f:
     line = f.readline().strip().split(' ')
     for i in line:
-        split_indicies.append(int(i))
-split_indicies.append(len(base))
+        grouping.append(int(i))
 
-base, split_indicies
+'''Load graph.'''
+graph = []
+with open("../tmp/graph.txt", 'r') as f:
+    for line in f:
+        line = line.strip().split(' ')
+        graph.append((int(line[0]), int(line[1])))
+
+base, grouping
 
 # %% [markdown]
 # ## Plot Graph
@@ -36,16 +43,21 @@ base, split_indicies
 '''Full Figure'''
 fig, ax = plt.subplots(figsize=(10, 10), subplot_kw={"projection": "3d"})
 
-colors = colormaps["nipy_spectral"](np.linspace(0, 1, len(split_indicies) - 1))
-for i in range(len(split_indicies) - 1):
-    l = split_indicies[i]
-    r = split_indicies[i+1]
+colors = colormaps["nipy_spectral"](np.linspace(0, 1, len(grouping) - 1))
+for i in range(len(grouping) - 1):
+    l = grouping[i]
+    r = grouping[i+1]
     x = base[l:r, 0]
     y = base[l:r, 1]
     z = base[l:r, 2]
+    segments = []
+    for (j, k) in graph:
+        if l <= j < r and l <= k < r:
+            segments.append([base[j], base[k]])
+    lc = Line3DCollection(segments, colors=colors[i], alpha=0.5)
+    ax.add_collection(lc)
     ax.scatter(x, y, z, c=colors[i], alpha=0.8)
 
 fig.show()
 
 input()
-

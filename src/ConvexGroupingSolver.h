@@ -1,5 +1,6 @@
 #pragma once
 
+#include <limits> // std::numeric_limits
 #include <numeric> // std::iota
 #include <vector> // std::vector
 #include <algorithm> // std::sort
@@ -16,7 +17,8 @@ public:
   /* Constructor */
   Solver(size_t dim, const std::vector<float>& base):
     base_(dim, base.size() / dim, base.data()), 
-    order_(base.size() / dim) {
+    order_(base.size() / dim),
+    graph_(base.size() / dim) {
     std::iota(order_.begin(), order_.end(), 0);
   }
   /* Destructor */
@@ -24,7 +26,7 @@ public:
     if constexpr (global::kDEBUG) {
       /* Save the order and grouping. */
       {
-        std::ofstream os("base_sorted.txt");
+        std::ofstream os("tmp/base_sorted.txt");
         for (size_t i = 0; i < n_base(); ++i) {
           for (size_t j = 0; j < dim(); ++j) {
             os << base_vec(i)[j] << ' ';
@@ -33,11 +35,18 @@ public:
         }
         os.close();
       } {
-        std::ofstream os("split_indicies.txt");
+        std::ofstream os("tmp/grouping.txt");
         for (auto ele : convex_groups_) {
           os << ele << ' ';
         }
         os.close();
+      } {
+        std::ofstream os("tmp/graph.txt");
+        for (size_t from = 0; from < n_base(); ++from) {
+          for (auto to : graph_.adj(from)) {
+            os << from << ' ' << to << '\n';
+          }
+        }
       }
     }
   }
@@ -47,50 +56,73 @@ public:
     size_t st = 0;
     do {
       convex_groups_.push_back(st);
-    } while ((st = peal(st)) != n_base());
+    } while ((st = build_partial(st)) != n_base());
     convex_groups_.push_back(n_base());
   };
-  void search();
+  void search() {
+
+  }
 private:
   /* Variables */
   const Mat<float, false> base_;
   std::vector<size_t> order_;
   std::vector<size_t> convex_groups_;
-  //Graph<Vec<float>> graph_;
+  Graph graph_;
+  std::vector<size_t> seeds_;
   /* Functions */
   /**
    * Find the largest outer convex group and rearrange the base vectors.
    *
    * @param st Index of the first base vector to construct the convex group.
    */
-  size_t peal(size_t st) {
+  size_t build_partial(size_t st) {
     size_t ed = st; //< Index to the first vector NOT belonging to the convex
                     //< group.
+    /* Select points for the convex group. */
+    std::vector<Vec<float>> random_dirs;
     for (size_t g = 0; g < GROUP_SIZE; ++g) {
       /* Select a random direction. */
       Vec<float> dir(dim());
       random_uniform(dir.data(), dim());
-      /* Find the 2 base vectors with the max and min product. */
-      std::vector<float> products_data(n_base() - st);
-      float* products = products_data.data() - st;
-      for (size_t i = st; i < n_base(); ++i)
-        products[i] = dot(dir.data(), base_vec(i), dim());
-      auto [min_iter, max_iter] = std::minmax_element(products + st, 
-                                                    products + n_base());
-      size_t min_idx = min_iter - products;
-      size_t max_idx = max_iter - products;
+      /* Find the base vector with the max dot product. */
+      float max_prod = std::numeric_limits<float>::min();
+      size_t max_idx = 0;
+      for (size_t i = st; i < n_base(); ++i) {
+        float prod = dot(dir.data(), base_vec(i), dim());
+        if (prod > max_prod) {
+          max_prod = prod;
+          max_idx = i;
+        }
+      }
       /* Put the vectors into the group. */
-      if (min_idx == max_idx) {
-        if (min_idx >= ed) swap_base_vec(ed++, min_idx);
-      } else {
-        if (min_idx >= ed) swap_base_vec(ed++, min_idx);
-        if (max_idx >= ed) swap_base_vec(ed++, max_idx);
+      if (max_idx >= ed) {
+        swap_base_vec(max_idx, ed++);
+        random_dirs.push_back(dir);
       }
     }
+    /* Construct the graph on the direction. */
+    const size_t kFANOUT = 7;
+    for (size_t from = st; from < ed; ++from) {
+      std::vector<std::pair<float, size_t>> products;
+      for (size_t to = st; to < ed; ++to) {
+        if (from == to) continue;
+        float product = dot(random_dirs[from - st].data(),
+                            random_dirs[to - st].data(),
+                            dim());
+        products.emplace_back(product, to);
+      }
+      std::partial_sort(products.begin(),
+                        std::min(products.begin() + kFANOUT, products.end()),
+                        products.end(),
+                        std::greater<std::pair<float, size_t>>{});
+      for (size_t i = 0; i < kFANOUT; ++i) {
+        size_t to = products[i].second;
+        graph_.connect(from, to);
+      }
+    }
+    /* Seed selection. */
+    seeds_.push_back(st);
     return ed;
-  }
-  void construct_graph(size_t st, size_t ed) {
-
   }
   /* Utility Functions */
   size_t dim() const {return base_.n();}
