@@ -5,17 +5,18 @@
 #include <chrono> // std::chrono
 #include <format> // std::format
 
-#include "Public.h" // kDATA_SET_INFOS
+#include "Global.h" // global::kDATA_SET_INFOS
 //#include "NaiveSolution.h" // Solution
 //#include "EmptySolution.h" // Solution
-#include "QuickSolution.h" // Solution
+//#include "QuickSolution.h" // Solution
+#include "ConvexGrouping.h" // Solution
 
 /* Function Declarations */
-void run(const DataSetInfo& dataset);
+void run(const global::DataSetInfo& dataset);
 
 /* Main Function */
 int main() {
-  run(kTEST_INFO);
+  run(global::kTEST_INFO);
   return 0;
 }
 
@@ -25,7 +26,7 @@ struct Sample {
 };
 
 /* Function Definitions */
-std::vector<float> load_base(const DataSetInfo& info) {
+std::vector<float> load_base(const global::DataSetInfo& info) {
   auto base_file = info.dataset_file;
   auto dims = info.dims;
   auto n_base = info.n_data_points;
@@ -35,7 +36,7 @@ std::vector<float> load_base(const DataSetInfo& info) {
   is.close();
   return base;
 }
-std::vector<std::vector<float>> load_samples(const DataSetInfo& info) {
+std::vector<std::vector<float>> load_samples(const global::DataSetInfo& info) {
   auto sample_file = info.sample_file;
   auto dims = info.dims;
   auto n_samples = info.n_queries;
@@ -49,12 +50,14 @@ std::vector<std::vector<float>> load_samples(const DataSetInfo& info) {
   is.close();
   return samples;
 }
-std::vector<std::vector<size_t>> load_labels(const DataSetInfo& info) {
+std::vector<std::vector<size_t>> load_labels(const global::DataSetInfo& info) {
   auto label_file = info.label_file;
   auto n_samples = info.n_queries;
   std::ifstream is(std::string{label_file});
-  std::vector<std::vector<size_t>> labels(n_samples,
-                                          std::vector<size_t>(kCRITERION));
+  std::vector<std::vector<size_t>> labels(
+    n_samples,
+    std::vector<size_t>(global::kCRITERION)
+  );
   for (auto& label : labels) {
     for (auto& ele : label) {
       is >> ele;
@@ -63,7 +66,7 @@ std::vector<std::vector<size_t>> load_labels(const DataSetInfo& info) {
   is.close();
   return labels;
 }
-void run(const DataSetInfo& info) { 
+void run(const global::DataSetInfo& info) { 
   /* Unpack the dataset info. */
   auto name = info.name;
   auto n_queries = info.n_queries;
@@ -84,18 +87,18 @@ void run(const DataSetInfo& info) {
   solution.build(dims, base);
   auto build_ed = high_resolution_clock::now();
   for (int i = 0; i < n_queries; ++i) {
-    res[i].resize(kCRITERION);
+    res[i].resize(global::kCRITERION);
     solution.search(samples[i], res[i].data());
   }
   auto search_ed = high_resolution_clock::now();
   /* Analyze the accuracy. */
   size_t correct_count = 0;
   for (size_t i = 0; i < n_queries; ++i) {
-    for (size_t j = 0; j < kCRITERION; ++j) {
+    for (size_t j = 0; j < global::kCRITERION; ++j) {
       if (res[i][j] == labels[i][j]) correct_count++;
     }
   }
-  double precision = (double)correct_count / (n_queries * kCRITERION);
+  double precision = (double)correct_count / (n_queries * global::kCRITERION);
   /* Output the result. */
   std::cout << std::format(
     "Total Time: {}\n",

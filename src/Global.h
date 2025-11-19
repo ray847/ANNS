@@ -1,12 +1,13 @@
 #pragma once
 
+#include <random> // std::mt19937
 #include <stdint.h> // uint64_t
 
 #include <string_view> // std::stirng_view
 #include <array> // std::array
 
-constexpr bool kDEBUG = true;
-
+namespace global {
+/* Type Defs */
 /**
  * Information on a single data set.
  *
@@ -22,6 +23,9 @@ struct DataSetInfo {
   int n_queries; //< Number of test queries
                  //< This is directly used by the query generator
 };
+
+/* Constants */
+constexpr bool kDEBUG = true;
 /* Constants */
 constexpr DataSetInfo kGLOVE_INFO{
   "Glove",
@@ -57,3 +61,7 @@ constexpr std::array<DataSetInfo, 3> kDATA_SET_INFOS{
 };
 constexpr uint32_t kSEED = 42; //< Seed for rng
 constexpr size_t kCRITERION = 10; //< Number of neighboring vectors to consider
+
+/* Global Variables */
+inline std::mt19937 rng{kSEED};
+} // namespace global

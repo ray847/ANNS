@@ -7,12 +7,12 @@
 #include <format> // std::format
 
 #include "NaiveSolution.h" // Solution
-#include "Public.h" // kDATA_SET_INFOS
+#include "Global.h" // global::kDATA_SET_INFOS
 
-void generate(const DataSetInfo& info);
+void generate(const global::DataSetInfo& info);
 
 int main() {
-  for (auto dataset_info : kDATA_SET_INFOS) {
+  for (auto dataset_info : global::kDATA_SET_INFOS) {
     try {
       generate(dataset_info);
     } catch (std::runtime_error e) {
@@ -30,7 +30,7 @@ std::vector<float> load_floats(const std::string& file, size_t count) {
   return data;
 }
 std::vector<int> generate_label(
-  const DataSetInfo& info,
+  const global::DataSetInfo& info,
   const std::vector<std::vector<float>>& queries
 ) { 
   /* Unpack the dataset info. */
@@ -54,24 +54,23 @@ std::vector<int> generate_label(
   std::cout << std::format("Done.\n");
   return res;
 }
-std::vector<std::vector<float>> generate_query(const DataSetInfo& info) {
+std::vector<std::vector<float>> generate_query(
+  const global::DataSetInfo& info
+) {
   auto n_queries = info.n_queries;
   auto dims = info.dims;
   std::vector<std::vector<float>> data(n_queries);
   {
-    std::random_device rd{};
-    std::mt19937 mt{rd()};
-    mt.seed(kSEED);
     std::normal_distribution<float> dis(0.0f, 1.0f);
     for (size_t i = 0; i < n_queries; ++i) {
       for (size_t j = 0; j < dims; ++j) {
-        data[i].emplace_back(dis(mt));
+        data[i].emplace_back(dis(global::rng));
       }
     }
   }
   return data;
 }
-void generate(const DataSetInfo& info) {
+void generate(const global::DataSetInfo& info) {
   /* Unpack the dataset info. */
   auto n_queries = info.n_queries;
   auto query_file = info.sample_file;
@@ -92,8 +91,8 @@ void generate(const DataSetInfo& info) {
   {
     std::ofstream os(std::string{label_file});
     for (size_t i = 0; i < n_queries; ++i) {
-      for (size_t j = 0; j < kCRITERION; ++j) {
-        os << labels[i * kCRITERION + j] << ' ';
+      for (size_t j = 0; j < global::kCRITERION; ++j) {
+        os << labels[i * global::kCRITERION + j] << ' ';
       } 
       os << '\n';
     }
