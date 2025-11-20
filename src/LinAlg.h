@@ -63,4 +63,12 @@ void random_uniform(T* x, size_t n, T mean = 0, T stddev = 1) {
   }
   normalize(x, n);
 }
+template<typename T>
+T L2(const T* x, const T* y, size_t n) {
+  T res;
+  for (size_t i = 0; i < n; ++i) {
+    res += (x[i] - y[i]) * (x[i] - y[i]);
+  }
+  return std::sqrt(res);
+}
 } // namespace solution

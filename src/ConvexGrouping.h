@@ -1,7 +1,9 @@
 #pragma once
 
 #include <memory> // std::unique_ptr
+#include <algorithm> // std::copy_n
 
+#include "Global.h" // global::kCRITERION
 #include "SolutionConcept.h" // IsSolution
 #include "ConvexGroupingSolver.h" // solution::Solver
 
@@ -34,6 +36,9 @@ public:
    * @param [out] res The place to put the results. Memory is pre-allocated.
    */
   inline void search(const std::vector<float>& query, int* res) {
+    solution::Vec<float> query_vec(query.size(), 1, query.data());
+    auto res_tmp = solver->search(query_vec);
+    std::copy_n(res_tmp.begin(), global::kCRITERION, res);
   }
 private:
   std::unique_ptr<solution::Solver<>> solver;

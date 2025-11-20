@@ -39,7 +39,7 @@ constexpr DataSetInfo kGLOVE_INFO{
 constexpr DataSetInfo kSIFT_INFO{
   "Sift",
   "./data_o/sift/base.txt",
-  "./data_o/sift/smaple.txt",
+  "./data_o/sift/sample.txt",
   "./data_o/sift/label.txt",
   128, 
   1000000,

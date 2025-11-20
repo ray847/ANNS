@@ -4,6 +4,7 @@
 #include <fstream> // std::ifstream
 #include <chrono> // std::chrono
 #include <format> // std::format
+#include <unordered_set> // std::unordered_set
 
 #include "Global.h" // global::kDATA_SET_INFOS
 //#include "NaiveSolution.h" // Solution
@@ -16,6 +17,8 @@ void run(const global::DataSetInfo& dataset);
 
 /* Main Function */
 int main() {
+  run(global::kGLOVE_INFO);
+  run(global::kSIFT_INFO);
   run(global::kTEST_INFO);
   return 0;
 }
@@ -66,6 +69,15 @@ std::vector<std::vector<size_t>> load_labels(const global::DataSetInfo& info) {
   is.close();
   return labels;
 }
+void save_res(const std::vector<std::vector<int>>& res) {
+  std::ofstream os ("tmp/search_res.txt");
+  for (size_t i = 0; i < res.size(); ++i) {
+    for (size_t j = 0; j < global::kCRITERION; ++j) {
+      os << res[i][j] << ' ';
+    }
+    os << '\n';
+  }
+}
 void run(const global::DataSetInfo& info) { 
   /* Unpack the dataset info. */
   auto name = info.name;
@@ -82,20 +94,21 @@ void run(const global::DataSetInfo& info) {
   using std::chrono::duration;
   using std::chrono::high_resolution_clock;
   Solution solution;
-  std::vector<std::vector<int>> res(n_queries);
+  std::vector<std::vector<int>> res(n_queries,
+                                    std::vector<int>(global::kCRITERION));
   auto st = high_resolution_clock::now();
   solution.build(dims, base);
   auto build_ed = high_resolution_clock::now();
   for (int i = 0; i < n_queries; ++i) {
-    res[i].resize(global::kCRITERION);
     solution.search(samples[i], res[i].data());
   }
   auto search_ed = high_resolution_clock::now();
   /* Analyze the accuracy. */
   size_t correct_count = 0;
   for (size_t i = 0; i < n_queries; ++i) {
+    std::unordered_set<int> res_set(res[i].begin(), res[i].end());
     for (size_t j = 0; j < global::kCRITERION; ++j) {
-      if (res[i][j] == labels[i][j]) correct_count++;
+      if (res_set.count(labels[i][j])) correct_count++;
     }
   }
   double precision = (double)correct_count / (n_queries * global::kCRITERION);
@@ -117,4 +130,5 @@ void run(const global::DataSetInfo& info) {
     duration_cast<duration<double>>(search_ed - build_ed) / n_queries
   );
   std::cout << std::format("Precision: {}\n", precision);
+  if constexpr (global::kDEBUG) save_res(res);
 }

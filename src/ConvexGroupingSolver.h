@@ -5,13 +5,16 @@
 #include <vector> // std::vector
 #include <algorithm> // std::sort
 #include <fstream> // std::ofstream
+#include <unordered_set> // std::set
+#include <iostream> // std::clog
 
+#include "Global.h"
 #include "LinAlg.h" // Mat, Vec
 #include "ConvexGroupingGraph.h" // solution::Graph
 
 namespace solution {
 /* Solver Class Definition */
-template<size_t GROUP_SIZE = 100>
+template<size_t GROUP_SIZE = 10000>
 class Solver {
 public:
   /* Constructor */
@@ -59,8 +62,48 @@ public:
     } while ((st = build_partial(st)) != n_base());
     convex_groups_.push_back(n_base());
   };
-  void search() {
-
+  std::vector<size_t> search(const Vec<float>& query) {
+    /* Navigate the graph. */
+    std::vector<std::pair<float, size_t>> points;
+    for (size_t seed : seeds_) {
+      std::pair<float, size_t> point = {
+        L2(query.data(), base_vec(seed), dim()),
+        seed
+      };
+      bool found = true;
+      while (found) {
+        found = false;
+        for (size_t adj : graph_.adj(point.second)) {
+          float dis = L2(query.data(), base_vec(adj), dim());
+          if (point.first > dis) {
+            point = {dis, adj};
+            found = true;
+            break;
+          }
+        }
+      }
+      points.push_back(point);
+    }
+    /* Get the first kCRITERION points. */
+    std::vector<size_t> res;
+    std::unordered_set<size_t> res_set;
+    for (size_t i = 0; i < global::kCRITERION; ++i) {
+      auto global_min = std::min_element(points.begin(), points.end());
+      res.push_back(actual_order(global_min->second));
+      res_set.insert(global_min->second);
+      std::vector<std::pair<float, size_t>> adj_points;
+      for (size_t adj : graph_.adj(global_min->second)) {
+        if (res_set.count(adj)) continue;
+        adj_points.emplace_back(L2(query.data(), base_vec(adj), dim()), adj);
+      }
+      if (adj_points.empty()) {
+        global_min->first = std::numeric_limits<float>::max();
+        continue;
+      }
+      auto group_min = std::min_element(adj_points.begin(), adj_points.end());
+      *global_min = *group_min;
+    }
+    return res;
   }
 private:
   /* Variables */
@@ -96,12 +139,13 @@ private:
       }
       /* Put the vectors into the group. */
       if (max_idx >= ed) {
+        std::clog << ed << std::endl;
         swap_base_vec(max_idx, ed++);
         random_dirs.push_back(dir);
       }
     }
     /* Construct the graph on the direction. */
-    const size_t kFANOUT = 7;
+    const size_t kFANOUT = 30;
     for (size_t from = st; from < ed; ++from) {
       std::vector<std::pair<float, size_t>> products;
       for (size_t to = st; to < ed; ++to) {
@@ -115,7 +159,7 @@ private:
                         std::min(products.begin() + kFANOUT, products.end()),
                         products.end(),
                         std::greater<std::pair<float, size_t>>{});
-      for (size_t i = 0; i < kFANOUT; ++i) {
+      for (size_t i = 0; i < std::min(kFANOUT, products.size()); ++i) {
         size_t to = products[i].second;
         graph_.connect(from, to);
       }
@@ -127,6 +171,7 @@ private:
   /* Utility Functions */
   size_t dim() const {return base_.n();}
   size_t n_base() const {return base_.m();}
+  size_t actual_order(size_t i) {return order_[i];}
   const float* base_vec(size_t i) const {
     return base_.data() + order_[i] * dim();
   }
