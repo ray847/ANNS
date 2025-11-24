@@ -7,18 +7,17 @@
 #include <unordered_set> // std::unordered_set
 
 #include "Global.h" // global::kDATA_SET_INFOS
-//#include "NaiveSolution.h" // Solution
 //#include "EmptySolution.h" // Solution
+//#include "NaiveSolution.h" // Solution
 //#include "QuickSolution.h" // Solution
-#include "ConvexGrouping.h" // Solution
+//#include "ConvexGrouping.h" // Solution
+#include "HnswSolution.h" // Solution
 
 /* Function Declarations */
 void run(const global::DataSetInfo& dataset);
 
 /* Main Function */
 int main() {
-  run(global::kGLOVE_INFO);
-  run(global::kSIFT_INFO);
   run(global::kTEST_INFO);
   return 0;
 }
