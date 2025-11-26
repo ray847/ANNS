@@ -10,7 +10,7 @@
 
 #include "Global.h"
 #include "LinAlg.h" // Mat, Vec
-#include "ConvexGroupingGraph.h" // solution::Graph
+#include "Graph.h" // solution::Graph
 
 namespace solution {
 /* Solver Class Definition */
@@ -21,7 +21,7 @@ public:
   Solver(size_t dim, const std::vector<float>& base):
     base_(dim, base.size() / dim, base.data()), 
     order_(base.size() / dim),
-    graph_(base.size() / dim) {
+    graph_() {
     std::iota(order_.begin(), order_.end(), 0);
   }
   /* Destructor */
