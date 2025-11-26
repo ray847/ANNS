@@ -45,6 +45,7 @@ constexpr DataSetInfo kSIFT_INFO{
   1000000,
   100,
 };
+/*
 constexpr DataSetInfo kTEST_INFO {
   "TEST",
   "./data_o/test/base.txt",
@@ -53,6 +54,16 @@ constexpr DataSetInfo kTEST_INFO {
   3,
   1000,
   10,
+};
+*/
+constexpr DataSetInfo kTEST_INFO {
+  "TEST",
+  "./data_o/mini_glove/base.txt",
+  "./data_o/mini_glove/sample.txt",
+  "./data_o/mini_glove/label.txt",
+  100,
+  20000,
+  100,
 };
 constexpr std::array<DataSetInfo, 3> kDATA_SET_INFOS{
   kGLOVE_INFO,

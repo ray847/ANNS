@@ -1,6 +1,5 @@
 #pragma once
 
-#include "SolutionConcept.h"
 #include <vector>
 #include <random>
 #include <algorithm>
@@ -209,8 +208,6 @@ private:
     }
   }
 };
-
-static_assert(IsSolution<Solution>);
 
 inline void Solution::build(int d, const std::vector<float>& base) {
   d_ = d;

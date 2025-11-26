@@ -18,7 +18,8 @@ void run(const global::DataSetInfo& dataset);
 
 /* Main Function */
 int main() {
-  run(global::kTEST_INFO);
+  run(global::kGLOVE_INFO);
+  //run(global::kTEST_INFO);
   return 0;
 }
 

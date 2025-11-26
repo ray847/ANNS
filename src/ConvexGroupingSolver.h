@@ -14,7 +14,7 @@
 
 namespace solution {
 /* Solver Class Definition */
-template<size_t GROUP_SIZE = 10000>
+template<size_t GROUP_SIZE = 2000>
 class Solver {
 public:
   /* Constructor */
@@ -36,6 +36,7 @@ public:
           }
           os << '\n';
         }
+
         os.close();
       } {
         std::ofstream os("tmp/grouping.txt");
@@ -63,45 +64,19 @@ public:
     convex_groups_.push_back(n_base());
   };
   std::vector<size_t> search(const Vec<float>& query) {
+    std::unordered_set<size_t> ignore;
     /* Navigate the graph. */
     std::vector<std::pair<float, size_t>> points;
     for (size_t seed : seeds_) {
-      std::pair<float, size_t> point = {
-        L2(query.data(), base_vec(seed), dim()),
-        seed
-      };
-      bool found = true;
-      while (found) {
-        found = false;
-        for (size_t adj : graph_.adj(point.second)) {
-          float dis = L2(query.data(), base_vec(adj), dim());
-          if (point.first > dis) {
-            point = {dis, adj};
-            found = true;
-            break;
-          }
-        }
-      }
-      points.push_back(point);
+      points.push_back(navigate_graph(seed, query, ignore));
     }
     /* Get the first kCRITERION points. */
     std::vector<size_t> res;
-    std::unordered_set<size_t> res_set;
     for (size_t i = 0; i < global::kCRITERION; ++i) {
       auto global_min = std::min_element(points.begin(), points.end());
       res.push_back(actual_order(global_min->second));
-      res_set.insert(global_min->second);
-      std::vector<std::pair<float, size_t>> adj_points;
-      for (size_t adj : graph_.adj(global_min->second)) {
-        if (res_set.count(adj)) continue;
-        adj_points.emplace_back(L2(query.data(), base_vec(adj), dim()), adj);
-      }
-      if (adj_points.empty()) {
-        global_min->first = std::numeric_limits<float>::max();
-        continue;
-      }
-      auto group_min = std::min_element(adj_points.begin(), adj_points.end());
-      *global_min = *group_min;
+      ignore.insert(global_min->second);
+     *global_min = navigate_graph(global_min->second, query, ignore);
     }
     return res;
   }
@@ -120,7 +95,7 @@ private:
    */
   size_t build_partial(size_t st) {
     size_t ed = st; //< Index to the first vector NOT belonging to the convex
-                    //< group.
+    //< group.
     /* Select points for the convex group. */
     std::vector<Vec<float>> random_dirs;
     for (size_t g = 0; g < GROUP_SIZE; ++g) {
@@ -139,34 +114,63 @@ private:
       }
       /* Put the vectors into the group. */
       if (max_idx >= ed) {
-        std::clog << ed << std::endl;
         swap_base_vec(max_idx, ed++);
         random_dirs.push_back(dir);
       }
     }
     /* Construct the graph on the direction. */
-    const size_t kFANOUT = 30;
+    const size_t kFANOUT = 15;
+    Mat<std::pair<float, size_t>> distance(ed - st, ed - st);
     for (size_t from = st; from < ed; ++from) {
-      std::vector<std::pair<float, size_t>> products;
-      for (size_t to = st; to < ed; ++to) {
-        if (from == to) continue;
-        float product = dot(random_dirs[from - st].data(),
-                            random_dirs[to - st].data(),
-                            dim());
-        products.emplace_back(product, to);
+      for (size_t to = st; to < from; ++to) {
+        float tmp = L2(base_vec(from), base_vec(to), dim());
+        distance.at(from - st, to - st) = {tmp, to};
+        distance.at(to - st, from - st) = {tmp, from};
       }
-      std::partial_sort(products.begin(),
-                        std::min(products.begin() + kFANOUT, products.end()),
-                        products.end(),
-                        std::greater<std::pair<float, size_t>>{});
-      for (size_t i = 0; i < std::min(kFANOUT, products.size()); ++i) {
-        size_t to = products[i].second;
+    }
+    for (size_t from = st; from < ed; ++from) {
+      std::partial_sort(&distance.at(from - st, 0),
+                        std::min(&distance.at(from - st, 0) + kFANOUT + 1,
+                                 &distance.at(from - st, ed - st)),
+                        &distance.at(from - st, ed - st));
+      for (size_t i = 1; i < std::min(kFANOUT + 1, ed - st); ++i) {
+        size_t to = distance.at(from - st, i).second;
         graph_.connect(from, to);
       }
     }
     /* Seed selection. */
     seeds_.push_back(st);
     return ed;
+  }
+  std::pair<float, size_t> navigate_graph(
+    size_t st,
+    const Vec<float>& query,
+    const std::unordered_set<size_t>& ignore
+  ) {
+    if (ignore.count(st)) {
+      for (size_t adj : graph_.adj(st)) {
+        if (!ignore.count(adj)) {
+          st = adj;
+          break;
+        }
+      }
+    }
+    float dis_st = L2(query.data(), base_vec(st), dim());
+    bool found = true;
+    while (found) {
+      found = false;
+      for (size_t adj : graph_.adj(st)) {
+        if (ignore.count(adj)) continue;
+        float dis = L2(query.data(), base_vec(adj), dim());
+        if (dis < dis_st) {
+          st = adj;
+          dis_st = dis;
+          found = true;
+          break;
+        }
+      }
+    }
+    return {dis_st, st};
   }
   /* Utility Functions */
   size_t dim() const {return base_.n();}
