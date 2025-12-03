@@ -1,7 +1,6 @@
 #include <iostream> // std:cerr
 #include <stdexcept> // std::runtime_error
 #include <vector> // std::vector
-#include <random> // std::random_device
 #include <fstream> // std::ofstream
 #include <string> // std::string
 #include <format> // std::format
@@ -12,13 +11,7 @@
 void generate(const global::DataSetInfo& info);
 
 int main() {
-  for (auto dataset_info : global::kDATA_SET_INFOS) {
-    try {
-      generate(dataset_info);
-    } catch (std::runtime_error e) {
-      std::cerr << e.what() << std::endl;
-    }
-  }
+  generate(global::kGLOVE_INFO);
 }
 
 std::vector<float> load_floats(const std::string& file, size_t count) {
@@ -31,7 +24,7 @@ std::vector<float> load_floats(const std::string& file, size_t count) {
 }
 std::vector<int> generate_label(
   const global::DataSetInfo& info,
-  const std::vector<std::vector<float>>& queries
+  const std::vector<float>& queries
 ) { 
   /* Unpack the dataset info. */
   auto name = info.name;
@@ -48,27 +41,13 @@ std::vector<int> generate_label(
   std::vector<int> res(n_queries * 10, 0);
   solution.build(dims, dataset);
   for (int i = 0; i < n_queries; ++i) {
-    solution.search(queries[i], res.data() + 10 * i);
+    std::vector<float> query(dims);
+    std::copy_n(&queries[i * dims], dims, query.begin());
+    solution.search(query, res.data() + 10 * i);
   }
   /* Save the labels. */
   std::cout << std::format("Done.\n");
   return res;
-}
-std::vector<std::vector<float>> generate_query(
-  const global::DataSetInfo& info
-) {
-  auto n_queries = info.n_queries;
-  auto dims = info.dims;
-  std::vector<std::vector<float>> data(n_queries);
-  {
-    std::normal_distribution<float> dis(0.0f, 1.0f);
-    for (size_t i = 0; i < n_queries; ++i) {
-      for (size_t j = 0; j < dims; ++j) {
-        data[i].emplace_back(dis(global::rng));
-      }
-    }
-  }
-  return data;
 }
 void generate(const global::DataSetInfo& info) {
   /* Unpack the dataset info. */
@@ -76,18 +55,9 @@ void generate(const global::DataSetInfo& info) {
   auto query_file = info.sample_file;
   auto label_file = info.label_file;
   auto dims = info.dims;
-  auto queries = generate_query(info);
+  auto queries = load_floats(std::string(query_file), dims * n_queries);
   auto labels = generate_label(info, queries);
   /* Save the results. */
-  {
-    std::ofstream os(std::string{query_file});
-    for (size_t i = 0; i < n_queries; ++i) {
-      for (size_t j = 0; j < dims; ++j) {
-        os << queries[i][j] << ' ';
-      }
-      os << '\n';
-    }
-  }
   {
     std::ofstream os(std::string{label_file});
     for (size_t i = 0; i < n_queries; ++i) {

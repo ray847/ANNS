@@ -8,8 +8,8 @@ add_executable(main
   src/main.cpp
 )
 
-add_executable(query_generator
-  src/QueryGenerator.cpp
+add_executable(label_generator
+  src/LabelGenerator.cpp
 )
 
 add_executable(test_data_genrator

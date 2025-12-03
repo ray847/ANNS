@@ -11,15 +11,17 @@
 //#include "NaiveSolution.h" // Solution
 //#include "QuickSolution.h" // Solution
 //#include "ConvexGrouping.h" // Solution
-#include "HnswSolution.h" // Solution
+//#include "HNSWSolution.h" // Solution
+//#include "HNSWOptiSolution.h" // Solution
+#include "HNSWDynamicEFSearch.h" // Solution
 
 /* Function Declarations */
 void run(const global::DataSetInfo& dataset);
 
 /* Main Function */
 int main() {
-  run(global::kGLOVE_INFO);
   //run(global::kTEST_INFO);
+  run(global::kSIFT_INFO);
   return 0;
 }
 

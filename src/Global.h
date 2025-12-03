@@ -34,7 +34,7 @@ constexpr DataSetInfo kGLOVE_INFO{
   "./data_o/glove/label.txt",
   100,
   1183514,
-  100,
+  10000,
 };
 constexpr DataSetInfo kSIFT_INFO{
   "Sift",
@@ -43,7 +43,7 @@ constexpr DataSetInfo kSIFT_INFO{
   "./data_o/sift/label.txt",
   128, 
   1000000,
-  100,
+  10000,
 };
 /*
 constexpr DataSetInfo kTEST_INFO {

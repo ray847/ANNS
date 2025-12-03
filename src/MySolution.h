@@ -6,7 +6,14 @@
 #include <queue>
 #include <cmath>
 #include <cstring>
-#include <limits>
+#include <mutex>
+#include <memory>
+#include <thread>
+#include <atomic>
+#include <iostream>
+#include <immintrin.h>
+
+#include "Global.h"
 
 class Solution {
 public:
@@ -14,26 +21,31 @@ public:
   void search(const std::vector<float>& query, int* res);
 
 private:
-  // --- Optimized Parameters for GloVe ---
-  // M=32 offers better recall for high-dim data (100d+) than 24
-  static constexpr int M = 32;               
-  static constexpr int M0 = M * 2;           
-  static constexpr int ef_construction = 500; 
-  static constexpr int ef_search = 800;       
-  static constexpr int MAX_LEVEL = 32;       
+  static constexpr int M = 64;               
+  static constexpr int M0 = 128;              
+  static constexpr int ef_construction = 600; 
+  static constexpr int ef_search = 300;       
+  static constexpr int MAX_LEVEL = 16;       
 
   int d_ = 0;
   size_t n_ = 0;
-  std::vector<float> data_;                 
-  std::vector<int> levels_;
-  // Flattening this vector in the future would provide further speedups, 
-  // but keeping your structure for now.
-  std::vector<std::vector<std::vector<int>>> graph_; 
+
+  const float* data_ptr_ = nullptr; 
+  std::vector<float> data_storage_;
+
+  struct Node {
+    int level;
+    std::vector<int> flat_links; 
+    std::vector<int> link_counts;
+    std::unique_ptr<std::mutex> lock;
+  };
+
+  std::vector<Node> nodes_;
 
   int entry_point_ = -1;
   int max_level_ = -1;
   double level_mult_;
-  std::mt19937 rng_{42};
+  std::mutex global_lock_;
 
   struct VisitedList {
     std::vector<unsigned short> tags;
@@ -54,283 +66,370 @@ private:
       tags[id] = current_tag;
       return false;
     }
-  } visited_;
+  };
 
-  // OPTIMIZATION: Removed sqrt. 
-  // Squared L2 preserves relative order (a < b iff a^2 < b^2) but is faster.
-  inline float dist_func_sq(const float* a, const float* b, int d) {
-    float res = 0;
-    // Manual unrolling or SIMD could go here, but compilers usually 
-    // auto-vectorize this loop well if d is known or simple.
-    for (int i = 0; i < d; ++i) {
-      float diff = a[i] - b[i];
-      res += diff * diff;
-    }
-    return res;
+  // --- AVX2 Distance ---
+  __attribute__((target("avx2,fma")))
+  inline float dist_func_sq(const float* a, const float* b, int d) const {
+      __m256 sum = _mm256_setzero_ps();
+      const float* end_safe = a + (d & ~7);
+      while (a < end_safe) {
+          __m256 v_a = _mm256_loadu_ps(a);
+          __m256 v_b = _mm256_loadu_ps(b);
+          __m256 diff = _mm256_sub_ps(v_a, v_b);
+          sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
+          a += 8; b += 8;
+      }
+      __m128 sum_low = _mm256_castps256_ps128(sum);
+      __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+      __m128 v_res = _mm_add_ps(sum_low, sum_high);
+      v_res = _mm_hadd_ps(v_res, v_res);
+      v_res = _mm_hadd_ps(v_res, v_res);
+      float res = _mm_cvtss_f32(v_res);
+      int remainder = d & 7; 
+      for (int i = 0; i < remainder; ++i) {
+          float diff = a[i] - b[i];
+          res += diff * diff;
+      }
+      return res;
   }
 
-  inline float dist_sq(int id_a, int id_b) {
-    return dist_func_sq(&data_[id_a * d_], &data_[id_b * d_], d_);
+  inline float dist_sq(int id_a, int id_b) const {
+      return dist_func_sq(data_ptr_ + id_a * d_, data_ptr_ + id_b * d_, d_);
   }
 
-  inline float dist_query_sq(const std::vector<float>& query, int id_node) {
-    return dist_func_sq(query.data(), &data_[id_node * d_], d_);
+  inline float dist_query_sq(const float* query, int id_node) const {
+      return dist_func_sq(query, data_ptr_ + id_node * d_, d_);
   }
 
-  int get_random_level() {
-    std::uniform_real_distribution<double> dist(0.0, 1.0);
-    double r = -std::log(dist(rng_)) * level_mult_;
-    return std::min(static_cast<int>(r), MAX_LEVEL);
+  inline int get_link_offset(int level) const {
+      return (level == 0) ? 0 : (M0 + (level - 1) * M);
   }
 
+  int get_random_level(std::mt19937& rng) {
+      std::uniform_real_distribution<double> dist(0.0, 1.0);
+      double r = -std::log(dist(rng)) * level_mult_;
+      return std::min(static_cast<int>(r), MAX_LEVEL);
+  }
+
+  // --- Build Phase Search (Standard) ---
   std::priority_queue<std::pair<float, int>> search_layer(
-    const float* query_data, 
-    int entry_point, 
-    int ef, 
-    int level
+      const float* query_data, int entry_point, int ef, int level, VisitedList& visited
   ) {
-    using QueueItem = std::pair<float, int>;
-    std::priority_queue<QueueItem> top_candidates; // max-heap (stores ef closest)
-    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates; // min-heap (exploration queue)
+      using QueueItem = std::pair<float, int>;
+      std::priority_queue<QueueItem> top_candidates;
+      std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
 
-    visited_.advance();
+      visited.advance();
+      float initial_dist = dist_query_sq(query_data, entry_point);
+      top_candidates.push({initial_dist, entry_point});
+      candidates.push({initial_dist, entry_point});
+      visited.visit(entry_point);
 
-    float initial_dist = dist_func_sq(query_data, &data_[entry_point * d_], d_);
-    
-    top_candidates.push({initial_dist, entry_point});
-    candidates.push({initial_dist, entry_point});
-    visited_.visit(entry_point);
+      while (!candidates.empty()) {
+          auto [curr_dist, curr_id] = candidates.top();
+          if (curr_dist > top_candidates.top().first && top_candidates.size() >= ef) break;
+          candidates.pop();
 
-    while (!candidates.empty()) {
-      auto [curr_dist, curr_id] = candidates.top();
-      candidates.pop();
+          const Node& node = nodes_[curr_id];
+          int size = node.link_counts[level]; 
+          int offset = get_link_offset(level);
+          const int* links = node.flat_links.data() + offset;
 
-      // CRITICAL OPTIMIZATION: 'break' instead of 'continue'.
-      // If the closest candidate in the queue is farther than our worst 'ef' result,
-      // we can stop safely because all subsequent candidates in min-heap are also farther.
-      if (curr_dist > top_candidates.top().first && top_candidates.size() >= ef) {
-        break; 
-      }
+          for (int i = 0; i < size; ++i) {
+              int neighbor_id = links[i];
+              if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i+1] * d_), _MM_HINT_T0);
 
-      const auto& neighbors = graph_[curr_id][level];
-      
-      // OPTIMIZATION: Prefetch memory for the neighbor list
-      // This brings the neighbor IDs into cache before we iterate
-      #ifdef __GNUC__
-        __builtin_prefetch(neighbors.data(), 0, 3);
-      #endif
-
-      for (int neighbor : neighbors) {
-        if (!visited_.visit(neighbor)) {
-          // OPTIMIZATION: Prefetch the actual vector data for this neighbor
-          #ifdef __GNUC__
-            __builtin_prefetch(&data_[neighbor * d_], 0, 0);
-          #endif
-
-          float d = dist_func_sq(query_data, &data_[neighbor * d_], d_);
-          
-          if (top_candidates.size() < ef || d < top_candidates.top().first) {
-            candidates.push({d, neighbor});
-            top_candidates.push({d, neighbor});
-            
-            if (top_candidates.size() > ef) {
-              top_candidates.pop();
-            }
+              if (!visited.visit(neighbor_id)) {
+                  float d = dist_query_sq(query_data, neighbor_id);
+                  if (top_candidates.size() < ef || d < top_candidates.top().first) {
+                      candidates.push({d, neighbor_id});
+                      top_candidates.push({d, neighbor_id});
+                      if (top_candidates.size() > ef) top_candidates.pop();
+                  }
+              }
           }
-        }
       }
-    }
-    return top_candidates;
+      return top_candidates;
   }
 
-  void get_neighbors_heuristic(int src, std::vector<std::pair<float, int>>& candidates, int level) {
-    int max_m = (level == 0) ? M0 : M;
-    
-    std::sort(candidates.begin(), candidates.end());
+  // --- Combined Search Helper (WITH MOVE-TO-FRONT) ---
+  std::priority_queue<std::pair<float, int>> search_combined_layers(
+      const float* query_data, int entry_point, int ef, VisitedList& visited
+  ) {
+      using QueueItem = std::pair<float, int>;
+      std::priority_queue<QueueItem> top_candidates;
+      std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
 
-    auto& neighbors = graph_[src][level];
-    neighbors.clear();
-    neighbors.reserve(max_m);
-
-    for (size_t i = 0; i < candidates.size() && neighbors.size() < max_m; ++i) {
-      int candidate_id = candidates[i].second;
-      float dist_to_src = candidates[i].first;
+      visited.advance();
+      float initial_dist = dist_query_sq(query_data, entry_point);
       
-      bool good = true;
-      for (int existing_neighbor : neighbors) {
-        float d_neighbor = dist_sq(candidate_id, existing_neighbor);
-        
-        // REVERTED TO STRICT HEURISTIC:
-        // Removing the 0.8 factor ensures better graph navigation properties (Triangle Inequality).
-        // While 0.8 keeps more edges, strict checking usually yields better recall at high EF.
-        if (d_neighbor < dist_to_src) {
-          good = false;
-          break;
-        }
+      top_candidates.push({initial_dist, entry_point});
+      candidates.push({initial_dist, entry_point});
+      visited.visit(entry_point);
+
+      while (!candidates.empty()) {
+          auto [curr_dist, curr_id] = candidates.top();
+          if (curr_dist > top_candidates.top().first && top_candidates.size() >= ef) break;
+          candidates.pop();
+
+          const Node& node = nodes_[curr_id];
+          int node_max_level = node.level;
+
+          for (int l = 0; l <= node_max_level; ++l) {
+              int size = node.link_counts[l];
+              int offset = get_link_offset(l);
+              
+              // We need non-const access to perform Move-To-Front
+              // We cast away const here. Note: This assumes search is not running 
+              // concurrently with other thread-unsafe operations on the same vector.
+              int* links = const_cast<int*>(node.flat_links.data() + offset);
+
+              for (int i = 0; i < size; ++i) {
+                  int neighbor_id = links[i];
+                  if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i+1] * d_), _MM_HINT_T0);
+
+                  if (!visited.visit(neighbor_id)) {
+                      float d = dist_query_sq(query_data, neighbor_id);
+                      
+                      // Check if this neighbor is "good enough" to be in top candidates
+                      if (top_candidates.size() < ef || d < top_candidates.top().first) {
+                          candidates.push({d, neighbor_id});
+                          top_candidates.push({d, neighbor_id});
+                          if (top_candidates.size() > ef) top_candidates.pop();
+
+                          // --- MOVE TO FRONT HEURISTIC ---
+                          // If this link was useful, swap it to the front (index 0).
+                          // This keeps hot paths at the beginning of the cache line.
+                          if (i > 0) {
+                              std::swap(links[0], links[i]);
+                          }
+                      }
+                  }
+              }
+          }
       }
-      if (good) {
-        neighbors.push_back(candidate_id);
-      }
-    }
-    
-    // Backfill if heuristic pruned too much (keeping connectivity)
-    // Removed the "min(3, max_m)" check to allow fuller graphs
-    if (neighbors.size() < max_m) { 
-        for (size_t i = 0; i < candidates.size() && neighbors.size() < max_m; ++i) {
-            int candidate_id = candidates[i].second;
-            bool found = false;
-            for(int existing : neighbors) {
-                if(existing == candidate_id) { found = true; break; }
-            }
-            if (!found) {
-                neighbors.push_back(candidate_id);
-            }
-        }
-    }
+      return top_candidates;
   }
 
-  void add_connection(int src, int dest, int level) {
-    auto& neighbors = graph_[src][level];
-    for (int n : neighbors) {
-      if (n == dest) return;
-    }
+  void get_neighbors_heuristic(
+      int src,
+      std::vector<std::pair<float, int>>& candidates,
+      int level,
+      int* output_buffer,
+      int& output_count
+  ) {
+      int max_m = (level == 0) ? M0 : M;
+      output_count = 0;
+      if (candidates.empty()) return;
+      std::sort(candidates.begin(), candidates.end());
 
-    neighbors.push_back(dest);
-
-    int max_m = (level == 0) ? M0 : M;
-    if (neighbors.size() > max_m) {
-      std::vector<std::pair<float, int>> candidates;
-      candidates.reserve(neighbors.size());
-      for (int n : neighbors) {
-        candidates.push_back({dist_sq(src, n), n});
+      for (const auto& cand : candidates) {
+          if (output_count >= max_m) break;
+          int cand_id = cand.second;
+          float dist_to_src = cand.first;
+          bool good = true;
+          for (int j = 0; j < output_count; ++j) {
+              if (dist_sq(cand_id, output_buffer[j]) < dist_to_src) {
+                  good = false; break;
+              }
+          }
+          if (good) output_buffer[output_count++] = cand_id;
       }
-      get_neighbors_heuristic(src, candidates, level);
-    }
+  }
+
+  // --- Thread-Safe Connection (WITH STRICT SORTING) ---
+  void add_connection(int src, int dest, int level) {
+      Node& node = nodes_[src];
+      std::lock_guard<std::mutex> lock(*node.lock);
+
+      int count = node.link_counts[level];
+      int offset = get_link_offset(level);
+      int* links_ptr = node.flat_links.data() + offset;
+
+      for (int i = 0; i < count; ++i) if (links_ptr[i] == dest) return;
+
+      int max_m = (level == 0) ? M0 : M;
+      
+      if (count < max_m) {
+          // --- STRICT SORTED INSERTION ---
+          // Instead of appending, we find the correct spot by distance.
+          float dest_dist = dist_sq(src, dest);
+          int insert_pos = count;
+
+          // Find insertion point
+          for(int i = 0; i < count; ++i) {
+              // Note: We must re-calculate distance here to sort.
+              // Ideally, this is cached, but for strict sorting we compute it.
+              float d = dist_sq(src, links_ptr[i]);
+              if (d > dest_dist) {
+                  insert_pos = i;
+                  break;
+              }
+          }
+
+          // Shift elements right to make room
+          for (int j = count; j > insert_pos; --j) {
+              links_ptr[j] = links_ptr[j-1];
+          }
+          
+          links_ptr[insert_pos] = dest;
+          __atomic_store_n(&node.link_counts[level], count + 1, __ATOMIC_RELEASE);
+
+      } else {
+          // If full, heuristic handles sorting automatically
+          std::vector<std::pair<float, int>> candidates;
+          candidates.reserve(max_m + 1);
+          for (int i = 0; i < count; ++i) candidates.push_back({dist_sq(src, links_ptr[i]), links_ptr[i]});
+          candidates.push_back({dist_sq(src, dest), dest});
+
+          std::vector<int> new_links(max_m);
+          int new_count = 0;
+          get_neighbors_heuristic(src, candidates, level, new_links.data(), new_count);
+
+          for(int i=0; i<new_count; ++i) links_ptr[i] = new_links[i];
+          if (new_count != count) __atomic_store_n(&node.link_counts[level], new_count, __ATOMIC_RELEASE);
+      }
   }
 };
 
 inline void Solution::build(int d, const std::vector<float>& base) {
-  d_ = d;
-  data_ = base;
-  n_ = base.size() / d;
-  
-  levels_.resize(n_);
-  graph_.resize(n_);
-  visited_.resize(n_);
-  level_mult_ = 1.0 / std::log(1.0 * M);
+    d_ = d;
+    data_storage_ = base;
+    data_ptr_ = data_storage_.data();
+    n_ = base.size() / d_;
+    nodes_.resize(n_);
+    level_mult_ = 1.0 / std::log(1.0 * M);
 
-  if (n_ == 0) return;
-
-  for (size_t i = 0; i < n_; ++i) {
-    int level = get_random_level();
-    levels_[i] = level;
-    graph_[i].resize(level + 1);
-    for (int l = 0; l <= level; ++l) {
-      graph_[i][l].reserve((l == 0 ? M0 : M) + 1);
+    std::mt19937 rng_init(42);
+    for (size_t i = 0; i < n_; ++i) {
+        int level = get_random_level(rng_init);
+        nodes_[i].level = level;
+        nodes_[i].link_counts.resize(level + 1, 0);
+        nodes_[i].lock = std::make_unique<std::mutex>(); 
+        size_t total_links = M0;
+        if (level > 0) total_links += (size_t)level * M;
+        nodes_[i].flat_links.resize(total_links);
     }
-  }
 
-  entry_point_ = 0;
-  max_level_ = levels_[0];
+    entry_point_ = 0;
+    max_level_ = nodes_[0].level;
 
-  for (size_t i = 1; i < n_; ++i) {
-    int curr_obj = i;
-    int curr_level = levels_[i];
-    int curr_ep = entry_point_;
-    const float* curr_vec = &data_[curr_obj * d_];
+    std::atomic<size_t> atomic_idx{1};       
+    std::atomic<size_t> progress_counter{0}; 
+    size_t total_work = n_ - 1;
 
-    // 1. Greedy descent
-    // Uses squared distance now
-    for (int l = max_level_; l > curr_level; l--) {
-      bool changed = true;
-      while (changed) {
-        changed = false;
-        float dist_ep = dist_sq(curr_obj, curr_ep);
-        for (int neighbor : graph_[curr_ep][l]) {
-          float d = dist_sq(curr_obj, neighbor);
-          if (d < dist_ep) {
-            curr_ep = neighbor;
-            dist_ep = d;
-            changed = true;
-          }
+    if constexpr (global::kDEBUG) {
+        std::cout << "Building HNSW (d=" << d_ << ", M=" << M << ") for " << n_ << " vectors..." << std::endl;
+    }
+
+    unsigned int num_threads = std::thread::hardware_concurrency();
+    if (num_threads == 0) num_threads = 4;
+
+    auto worker_func = [&](int thread_id) {
+        VisitedList visited;
+        visited.resize(n_);
+        std::mt19937 rng(42 + thread_id); 
+
+        while (true) {
+            size_t curr_obj = atomic_idx.fetch_add(1, std::memory_order_relaxed);
+            if (curr_obj >= n_) break;
+
+            int curr_level = nodes_[curr_obj].level;
+            int curr_ep = entry_point_;
+            int curr_max_level = max_level_;
+            const float* curr_vec = data_ptr_ + curr_obj * d_;
+
+            // 1. Descent
+            for (int l = curr_max_level; l > curr_level; l--) {
+                bool changed = true;
+                while (changed) {
+                    changed = false;
+                    float dist_ep = dist_query_sq(curr_vec, curr_ep);
+                    const Node& node_ep = nodes_[curr_ep];
+                    if (l >= node_ep.link_counts.size()) break;
+                    
+                    int offset = get_link_offset(l);
+                    int count = node_ep.link_counts[l];
+                    const int* links = node_ep.flat_links.data() + offset;
+                    
+                    for(int j=0; j<count; ++j) {
+                        int neighbor = links[j];
+                        float d = dist_query_sq(curr_vec, neighbor);
+                        if(d < dist_ep) {
+                            curr_ep = neighbor;
+                            dist_ep = d;
+                            changed = true;
+                        }
+                    }
+                }
+            }
+
+            // 2. Construction
+            for (int l = std::min(curr_level, curr_max_level); l >= 0; l--) {
+                auto top_candidates = search_layer(curr_vec, curr_ep, ef_construction, l, visited);
+                std::vector<std::pair<float, int>> potential;
+                potential.reserve(ef_construction + 1);
+                while(!top_candidates.empty()) {
+                    potential.push_back(top_candidates.top());
+                    top_candidates.pop();
+                }
+                
+                int offset = get_link_offset(l);
+                int* link_dst = nodes_[curr_obj].flat_links.data() + offset;
+                int count = 0;
+                get_neighbors_heuristic(curr_obj, potential, l, link_dst, count);
+                nodes_[curr_obj].link_counts[l] = count;
+                
+                for(int j=0; j<count; ++j) add_connection(link_dst[j], curr_obj, l);
+                if (!potential.empty()) curr_ep = potential[0].second;
+            }
+
+            if (curr_level > max_level_) {
+                std::lock_guard<std::mutex> lock(global_lock_);
+                if (curr_level > max_level_) {
+                    max_level_ = curr_level;
+                    entry_point_ = curr_obj;
+                }
+            }
+            // Progress display omitted for brevity
         }
-      }
+    };
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+    for(unsigned int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(worker_func, i);
     }
-
-    // 2. Construction
-    for (int l = std::min(curr_level, max_level_); l >= 0; l--) {
-      // search_layer now handles visited_.advance() internally
-      auto top_candidates = search_layer(curr_vec, curr_ep, ef_construction, l);
-
-      std::vector<std::pair<float, int>> potential_neighbors;
-      potential_neighbors.reserve(ef_construction);
-      while (!top_candidates.empty()) {
-        potential_neighbors.push_back(top_candidates.top());
-        top_candidates.pop();
-      }
-
-      get_neighbors_heuristic(curr_obj, potential_neighbors, l);
-
-      for (int neighbor : graph_[curr_obj][l]) {
-        add_connection(neighbor, curr_obj, l);
-      }
-
-      if (!potential_neighbors.empty()) {
-        curr_ep = potential_neighbors[0].second;
-      }
+    for(auto& t : threads) {
+        t.join();
     }
-
-    if (curr_level > max_level_) {
-      max_level_ = curr_level;
-      entry_point_ = curr_obj;
-    }
-  }
+    if constexpr (global::kDEBUG) std::cout << "Build: 100% - Done.\n";
 }
 
 inline void Solution::search(const std::vector<float>& query, int* res) {
-  if (n_ == 0) return;
+    static thread_local VisitedList visited;
+    if (visited.tags.size() != n_) visited.resize(n_);
+    
+    int curr_ep = entry_point_;
+    const float* q_data = query.data();
 
-  int curr_ep = entry_point_;
+    // Perform ONE search on the combined graph (all layers)
+    auto top_candidates = search_combined_layers(q_data, curr_ep, ef_search, visited);
 
-  // Greedy descent
-  for (int l = max_level_; l > 0; l--) {
-    bool changed = true;
-    while (changed) {
-      changed = false;
-      float dist_ep = dist_query_sq(query, curr_ep);
-      for (int neighbor : graph_[curr_ep][l]) {
-        float d = dist_query_sq(query, neighbor);
-        if (d < dist_ep) {
-          curr_ep = neighbor;
-          dist_ep = d;
-          changed = true;
-        }
-      }
+    size_t k = 0;
+    std::vector<std::pair<float, int>> sorted;
+    sorted.reserve(top_candidates.size());
+    
+    while(!top_candidates.empty()) {
+        sorted.push_back(top_candidates.top());
+        top_candidates.pop();
     }
-  }
-
-  // Beam search at layer 0
-  auto top_candidates = search_layer(query.data(), curr_ep, ef_search, 0);
-
-  std::vector<std::pair<float, int>> results;
-  results.reserve(ef_search);
-  while (!top_candidates.empty()) {
-    results.push_back(top_candidates.top());
-    top_candidates.pop();
-  }
-
-  // Sort by distance (smallest first)
-  // Note: Standard sort on pairs sorts by first element (distance) ascending by default
-  // But priority_queue was a Max Heap, so we popped them largest-first?
-  // Actually, search_layer returns a max-heap (farthest of the k-nearest at top).
-  // We need to reverse or sort.
-  std::sort(results.begin(), results.end());
-
-  for (size_t i = 0; i < 10 && i < results.size(); ++i) {
-    res[i] = results[i].second;
-  }
-  
-  for (size_t i = results.size(); i < 10; ++i) {
-    res[i] = -1;
-  }
+    std::sort(sorted.begin(), sorted.end());
+    
+    for (const auto& p : sorted) {
+        if (k >= 10) break;
+        res[k++] = p.second;
+    }
+    while (k < 10) res[k++] = -1;
 }

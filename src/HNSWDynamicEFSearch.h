@@ -18,13 +18,15 @@
 
 class Solution {
 public:
-  // Destructor: Prints statistics when the program ends (if in DEBUG mode)
   ~Solution() {
     if constexpr (global::kDEBUG) {
       size_t s = total_searches_.load();
       if (s > 0) {
         size_t d = total_dist_calcs_.load();
+        std::cout << "\n[DEBUG] Stats Report:\n";
+        std::cout << "  - Total Searches: " << s << "\n";
         std::cout << "  - Avg Distance Calcs per Search: " << (double)d / s << "\n";
+        std::cout << "-----------------------------------\n";
       }
     }
   }
@@ -33,14 +35,19 @@ public:
   void search(const std::vector<float>& query, int* res);
 
 private:
-  // --- Optimized Parameters for 98%+ Accuracy ---
-  static constexpr int M = 64;                // High connectivity for complex data
-  static constexpr int M0 = 128;              // Double connectivity for Layer 0
-  static constexpr int ef_construction = 600; // Deep construction search for better graph quality
-  static constexpr int ef_search = 300;      // Wide beam search for maximum recall
+  // --- Parameters ---
+  static constexpr int M = 80;
+  static constexpr int M0 = M * 2;              
+  static constexpr int ef_construction = 1200; 
+  
+  // DYNAMIC CONFIGURATION
+  // We set a high 'Ceiling' for ef, but a tighter 'Patience' for speed.
+  static constexpr int ef_search_max = 4000; // Allow very deep search if needed
+  static constexpr int search_patience = 4000; // Stop if no improvement after 200 checks
+
   static constexpr int MAX_LEVEL = 16;       
 
-  // --- Statistics Counters ---
+  // --- Statistics ---
   inline static std::atomic<size_t> total_dist_calcs_{0};
   inline static std::atomic<size_t> total_searches_{0};
   inline static thread_local size_t local_dist_count_{0};
@@ -86,47 +93,40 @@ private:
     }
   };
 
-  // --- AVX2 Distance with Stats Tracking ---
+  // --- AVX2 Distance ---
   __attribute__((target("avx2,fma")))
   inline float dist_func_sq(const float* a, const float* b, int d) const {
-    if constexpr (global::kDEBUG) {
-      local_dist_count_++;
-    }
-
+    if constexpr (global::kDEBUG) local_dist_count_++;
+    
     __m256 sum = _mm256_setzero_ps();
     const float* end_safe = a + (d & ~7);
-
     while (a < end_safe) {
       __m256 v_a = _mm256_loadu_ps(a);
       __m256 v_b = _mm256_loadu_ps(b);
       __m256 diff = _mm256_sub_ps(v_a, v_b);
       sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
-      a += 8; 
-      b += 8;
+      a += 8; b += 8;
     }
-
     __m128 sum_low = _mm256_castps256_ps128(sum);
     __m128 sum_high = _mm256_extractf128_ps(sum, 1);
     __m128 v_res = _mm_add_ps(sum_low, sum_high);
     v_res = _mm_hadd_ps(v_res, v_res);
     v_res = _mm_hadd_ps(v_res, v_res);
     float res = _mm_cvtss_f32(v_res);
-
     int remainder = d & 7; 
     for (int i = 0; i < remainder; ++i) {
       float diff = a[i] - b[i];
       res += diff * diff;
     }
-
     return res;
-  }
-
-  inline float dist_sq(int id_a, int id_b) const {
-    return dist_func_sq(data_ptr_ + id_a * d_, data_ptr_ + id_b * d_, d_);
   }
 
   inline float dist_query_sq(const float* query, int id_node) const {
     return dist_func_sq(query, data_ptr_ + id_node * d_, d_);
+  }
+  
+  inline float dist_sq(int id_a, int id_b) const {
+    return dist_func_sq(data_ptr_ + id_a * d_, data_ptr_ + id_b * d_, d_);
   }
 
   inline int get_link_offset(int level) const {
@@ -139,13 +139,13 @@ private:
     return std::min(static_cast<int>(r), MAX_LEVEL);
   }
 
-  // --- Search Logic ---
-  std::priority_queue<std::pair<float, int>> search_layer(
-    const float* query_data, int entry_point, int ef, int level, VisitedList& visited
+  // --- DYNAMIC SEARCH LAYER ---
+  std::priority_queue<std::pair<float, int>> search_layer_dynamic(
+    const float* query_data, int entry_point, int ef_cap, int patience, int level, VisitedList& visited
   ) {
     using QueueItem = std::pair<float, int>;
-    std::priority_queue<QueueItem> top_candidates;
-    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
+    std::priority_queue<QueueItem> top_candidates; // Keeps track of best 'ef' nodes found
+    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates; // Min-heap for exploration
 
     visited.advance();
     float initial_dist = dist_query_sq(query_data, entry_point);
@@ -153,10 +153,26 @@ private:
     candidates.push({initial_dist, entry_point});
     visited.visit(entry_point);
 
+    // Dynamic Variables
+    float best_dist_global = initial_dist;
+    int steps_without_improvement = 0;
+
     while (!candidates.empty()) {
       auto [curr_dist, curr_id] = candidates.top();
-      if (curr_dist > top_candidates.top().first && top_candidates.size() >= ef) break;
+      
+      // Standard Termination:
+      // If the closest candidate to explore is worse than the worst node in our buffer
+      if (curr_dist > top_candidates.top().first && top_candidates.size() >= ef_cap) {
+        break;
+      }
       candidates.pop();
+
+      // DYNAMIC TERMINATION (Patience):
+      // If we haven't found a new GLOBAL best in 'patience' steps, stop.
+      // This allows us to set ef_cap very high (for recall) but stop early (for speed).
+      if (steps_without_improvement > patience) {
+        break; 
+      }
 
       const Node& node = nodes_[curr_id];
       int size = node.link_counts[level]; 
@@ -169,10 +185,24 @@ private:
 
         if (!visited.visit(neighbor_id)) {
           float d = dist_query_sq(query_data, neighbor_id);
-          if (top_candidates.size() < ef || d < top_candidates.top().first) {
+          
+          if (top_candidates.size() < ef_cap || d < top_candidates.top().first) {
             candidates.push({d, neighbor_id});
             top_candidates.push({d, neighbor_id});
-            if (top_candidates.size() > ef) top_candidates.pop();
+            
+            if (top_candidates.size() > ef_cap) {
+              top_candidates.pop();
+            }
+
+            // Check for improvement
+            if (d < best_dist_global) {
+              best_dist_global = d;
+              steps_without_improvement = 0; // Reset patience
+            } else {
+              steps_without_improvement++;
+            }
+          } else {
+            steps_without_improvement++;
           }
         }
       }
@@ -180,7 +210,7 @@ private:
     return top_candidates;
   }
 
-  // --- Relaxed Heuristic (Crucial for 98% Recall) ---
+  // --- Relaxed Heuristic ---
   void get_neighbors_heuristic(
     int src,
     std::vector<std::pair<float, int>>& candidates,
@@ -191,20 +221,16 @@ private:
     int max_m = (level == 0) ? M0 : M;
     output_count = 0;
     if (candidates.empty()) return;
-
     std::sort(candidates.begin(), candidates.end());
 
     for (const auto& cand : candidates) {
       if (output_count >= max_m) break;
       int cand_id = cand.second;
       float dist_to_src = cand.first;
-      
       bool good = true;
       for (int j = 0; j < output_count; ++j) {
-        float d_neighbor = dist_sq(cand_id, output_buffer[j]);
-        if (d_neighbor < dist_to_src) {
-          good = false; 
-          break;
+        if (dist_sq(cand_id, output_buffer[j]) < dist_to_src) {
+          good = false; break;
         }
       }
       if (good) output_buffer[output_count++] = cand_id;
@@ -223,8 +249,6 @@ private:
     for (int i = 0; i < count; ++i) if (links_ptr[i] == dest) return;
 
     int max_m = (level == 0) ? M0 : M;
-
-    // Optimized insertion: simple insert if space permits, heuristic if full
     if (count < max_m) {
       links_ptr[count] = dest;
       __atomic_store_n(&node.link_counts[level], count + 1, __ATOMIC_RELEASE);
@@ -233,11 +257,9 @@ private:
       candidates.reserve(max_m + 1);
       for (int i = 0; i < count; ++i) candidates.push_back({dist_sq(src, links_ptr[i]), links_ptr[i]});
       candidates.push_back({dist_sq(src, dest), dest});
-
       std::vector<int> new_links(max_m);
       int new_count = 0;
       get_neighbors_heuristic(src, candidates, level, new_links.data(), new_count);
-
       for(int i=0; i<new_count; ++i) links_ptr[i] = new_links[i];
       if (new_count != count) __atomic_store_n(&node.link_counts[level], new_count, __ATOMIC_RELEASE);
     }
@@ -254,7 +276,6 @@ inline void Solution::build(int d, const std::vector<float>& base) {
   nodes_.resize(n_);
   level_mult_ = 1.0 / std::log(1.0 * M);
 
-  // Initialize nodes and locks
   std::mt19937 rng_init(42);
   for (size_t i = 0; i < n_; ++i) {
     int level = get_random_level(rng_init);
@@ -268,14 +289,13 @@ inline void Solution::build(int d, const std::vector<float>& base) {
 
   entry_point_ = 0;
   max_level_ = nodes_[0].level;
-
-  // --- Multithreading & Progress Setup ---
+  
   std::atomic<size_t> atomic_idx{1};       
   std::atomic<size_t> progress_counter{0}; 
   size_t total_work = n_ - 1;
 
   if constexpr (global::kDEBUG) {
-    std::cout << "Building HNSW (d=" << d_ << ", M=" << M << ") for " << n_ << " vectors..." << std::endl;
+    std::cout << "Building HNSW (Dynamic ef_search Enabled)..." << std::endl;
   }
 
   unsigned int num_threads = std::thread::hardware_concurrency();
@@ -295,7 +315,6 @@ inline void Solution::build(int d, const std::vector<float>& base) {
       int curr_max_level = max_level_;
       const float* curr_vec = data_ptr_ + curr_obj * d_;
 
-      // 1. Zoom-in (Greedy Descent)
       for (int l = curr_max_level; l > curr_level; l--) {
         bool changed = true;
         while (changed) {
@@ -303,11 +322,9 @@ inline void Solution::build(int d, const std::vector<float>& base) {
           float dist_ep = dist_query_sq(curr_vec, curr_ep);
           const Node& node_ep = nodes_[curr_ep];
           if (l >= node_ep.link_counts.size()) break;
-
           int offset = get_link_offset(l);
           int count = node_ep.link_counts[l];
           const int* links = node_ep.flat_links.data() + offset;
-
           for(int j=0; j<count; ++j) {
             int neighbor = links[j];
             float d = dist_query_sq(curr_vec, neighbor);
@@ -320,9 +337,16 @@ inline void Solution::build(int d, const std::vector<float>& base) {
         }
       }
 
-      // 2. Construction (Insert & Link)
       for (int l = std::min(curr_level, curr_max_level); l >= 0; l--) {
-        auto top_candidates = search_layer(curr_vec, curr_ep, ef_construction, l, visited);
+        // For construction, we use fixed 'ef' and high patience to ensure graph quality
+        auto top_candidates = search_layer_dynamic(
+          curr_vec,
+          curr_ep,
+          ef_construction,
+          1000000,
+          l,
+          visited
+        );
         
         std::vector<std::pair<float, int>> potential;
         potential.reserve(ef_construction + 1);
@@ -334,19 +358,12 @@ inline void Solution::build(int d, const std::vector<float>& base) {
         int offset = get_link_offset(l);
         int* link_dst = nodes_[curr_obj].flat_links.data() + offset;
         int count = 0;
-        
-        // Select and link neighbors for current object
         get_neighbors_heuristic(curr_obj, potential, l, link_dst, count);
         nodes_[curr_obj].link_counts[l] = count;
-
-        // Add back-links
         for(int j=0; j<count; ++j) add_connection(link_dst[j], curr_obj, l);
-        
-        // Update entry point for next layer down
         if (!potential.empty()) curr_ep = potential[0].second;
       }
 
-      // 3. Update Global Entry Point
       if (curr_level > max_level_) {
         std::lock_guard<std::mutex> lock(global_lock_);
         if (curr_level > max_level_) {
@@ -355,9 +372,7 @@ inline void Solution::build(int d, const std::vector<float>& base) {
         }
       }
 
-      // 4. Progress Display
       if constexpr (global::kDEBUG) {
-        // Only update periodically to reduce contention
         if (curr_obj % 1000 == 0) {
           size_t p = progress_counter.fetch_add(1000, std::memory_order_relaxed);
           if (total_work > 0 && (p % (total_work / 100 + 1) == 0)) {
@@ -370,25 +385,14 @@ inline void Solution::build(int d, const std::vector<float>& base) {
   };
 
   std::vector<std::thread> threads;
-  threads.reserve(num_threads);
-  for(unsigned int i = 0; i < num_threads; ++i) {
-    threads.emplace_back(worker_func, i);
-  }
-  for(auto& t : threads) {
-    t.join();
-  }
-
-  if constexpr (global::kDEBUG) {
-    std::cout << "Build: 100% - Done.\n";
-  }
+  for(unsigned int i = 0; i < num_threads; ++i) threads.emplace_back(worker_func, i);
+  for(auto& t : threads) t.join();
+  if constexpr (global::kDEBUG) std::cout << "Build: 100% - Done.\n";
 }
 
 inline void Solution::search(const std::vector<float>& query, int* res) {
-  // Reset local stats
-  if constexpr (global::kDEBUG) {
-    local_dist_count_ = 0;
-  }
-
+  if constexpr (global::kDEBUG) local_dist_count_ = 0;
+  
   static thread_local VisitedList visited;
   if (visited.tags.size() != n_) visited.resize(n_);
 
@@ -396,7 +400,7 @@ inline void Solution::search(const std::vector<float>& query, int* res) {
   int m_level = max_level_;
   const float* q_data = query.data();
 
-  // 1. Greedy Descent (Top Layers)
+  // Greedy Descent
   for (int l = m_level; l > 0; l--) {
     bool changed = true;
     while (changed) {
@@ -404,11 +408,9 @@ inline void Solution::search(const std::vector<float>& query, int* res) {
       float dist_ep = dist_query_sq(q_data, curr_ep);
       const Node& node = nodes_[curr_ep];
       if (l >= node.link_counts.size()) break;
-      
       int offset = get_link_offset(l);
       int count = node.link_counts[l];
       const int* links = node.flat_links.data() + offset;
-      
       for (int i = 0; i < count; ++i) {
         int neighbor = links[i];
         if (i + 1 < count) _mm_prefetch((const char*)(data_ptr_ + links[i+1] * d_), _MM_HINT_T0);
@@ -422,10 +424,11 @@ inline void Solution::search(const std::vector<float>& query, int* res) {
     }
   }
 
-  // 2. Beam Search (Layer 0)
-  auto top = search_layer(q_data, curr_ep, ef_search, 0, visited);
+  // --- USE DYNAMIC LAYER 0 SEARCH ---
+  // We use a high 'ef' ceiling (ef_search_max) but limit it with 'search_patience'.
+  // Hard queries will expand to the ceiling. Easy queries will exit when patience runs out.
+  auto top = search_layer_dynamic(q_data, curr_ep, ef_search_max, search_patience, 0, visited);
 
-  // 3. Format Results
   size_t k = 0;
   std::vector<std::pair<float, int>> sorted;
   sorted.reserve(top.size());
@@ -441,7 +444,6 @@ inline void Solution::search(const std::vector<float>& query, int* res) {
   }
   while (k < 10) res[k++] = -1;
 
-  // 4. Aggregate Stats
   if constexpr (global::kDEBUG) {
     total_dist_calcs_ += local_dist_count_;
     total_searches_++;
