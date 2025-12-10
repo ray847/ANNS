@@ -11,7 +11,7 @@
 void generate(const global::DataSetInfo& info);
 
 int main() {
-  generate(global::kGLOVE_INFO);
+  generate(global::kMINISIFT_INFO);
 }
 
 std::vector<float> load_floats(const std::string& file, size_t count) {

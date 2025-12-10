@@ -29,18 +29,18 @@ constexpr bool kDEBUG = true;
 /* Constants */
 constexpr DataSetInfo kGLOVE_INFO{
   "Glove",
-  "./data_o/glove/base.txt",
-  "./data_o/glove/sample.txt",
-  "./data_o/glove/label.txt",
+  "../data_o/glove/base.txt",
+  "../data_o/glove/sample.txt",
+  "../data_o/glove/label.txt",
   100,
   1183514,
   10000,
 };
 constexpr DataSetInfo kSIFT_INFO{
   "Sift",
-  "./data_o/sift/base.txt",
-  "./data_o/sift/sample.txt",
-  "./data_o/sift/label.txt",
+  "../data_o/sift/base.txt",
+  "../data_o/sift/sample.txt",
+  "../data_o/sift/label.txt",
   128, 
   1000000,
   10000,
@@ -48,27 +48,45 @@ constexpr DataSetInfo kSIFT_INFO{
 /*
 constexpr DataSetInfo kTEST_INFO {
   "TEST",
-  "./data_o/test/base.txt",
-  "./data_o/test/sample.txt",
-  "./data_o/test/label.txt",
+  "../data_o/test/base.txt",
+  "../data_o/test/sample.txt",
+  "../data_o/test/label.txt",
   3,
   1000,
   10,
 };
 */
-constexpr DataSetInfo kTEST_INFO {
-  "TEST",
-  "./data_o/mini_glove/base.txt",
-  "./data_o/mini_glove/sample.txt",
-  "./data_o/mini_glove/label.txt",
+constexpr DataSetInfo kMINISIFT_INFO {
+  "Mini SIFT",
+  "../data_o/mini_sift/base.txt",
+  "../data_o/mini_sift/sample.txt",
+  "../data_o/mini_sift/label.txt",
+  128,
+  10000,
+  100,
+};
+constexpr DataSetInfo kMINIGLOVE_INFO {
+  "Mini GloVe",
+  "../data_o/mini_glove/base.txt",
+  "../data_o/mini_glove/sample.txt",
+  "../data_o/mini_glove/label.txt",
   100,
   20000,
   100,
 };
+constexpr DataSetInfo kTEST_INFO {
+  "TEST",
+  "../data_o/test/base.txt",
+  "../data_o/test/sample.txt",
+  "../data_o/test/label.txt",
+  3,
+  1000,
+  10,
+};
 constexpr std::array<DataSetInfo, 3> kDATA_SET_INFOS{
   kGLOVE_INFO,
   kSIFT_INFO,
-  kTEST_INFO
+  kMINIGLOVE_INFO
 };
 constexpr uint32_t kSEED = 42; //< Seed for rng
 constexpr size_t kCRITERION = 10; //< Number of neighboring vectors to consider

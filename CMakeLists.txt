@@ -6,6 +6,7 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_executable(main
   src/main.cpp
+  src/FinalSolution.cpp
 )
 
 add_executable(label_generator
@@ -15,3 +16,12 @@ add_executable(label_generator
 add_executable(test_data_genrator
   src/TestDataGenerator.cpp
 )
+
+add_executable(create_mini_dataset
+  src/CreateMiniDataset.cpp
+)
+
+# add_executable(test_bench
+#   src/TestBench.cpp
+# )
+

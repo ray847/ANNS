@@ -1,29 +1,21 @@
 # Optimization
 
-## NaiveSolution
+## Base Algorithm
 
-We just calculate the distance of the query vector to every other vector and
-select the closest k base vectors.
+* HNSW
 
-### Complexity Analysis
+## Optimization Techniques
 
-Build Time: O(N * d)
-Build Space (Final / During): O(N * d) / O(N * d)
-Search Time: O(N * d + qlogN)
-Search Space: O(N)
+* SIMD instruction set + Hardcoded Dimensions(100 / 128)
+* Optimized Product Quantization
+* Dynamic Search
+* IVF
+* Upper Layer Beam Search
 
-## HNSW Optimizations
+## Metrics
 
-1. Distance sorting
-2. Dynamic exploration factor
-
-## Complexity Analysis
-
-$$\text{Vector Dimension} = d$$
-$$|\{\text{Base Vector}\}| = N$$
-$$\text{Query Count} = q$$
-
-|Algorithm|Build Time|Build Space (Final / During) |Search Time|Search Space|
-|-|-|-|-|-|
-|Naive|O(N * d)|O(N * d) / O(N * d)|O(N * d + qlogN)|O(N)|
-
+* Build Time
+* Average Search Time
+* Accuracy
+* Average Search Distance Calculations per Search
+* Averge Navigation Time per Layer (include layer 0)

@@ -1,435 +1,1080 @@
 #pragma once
 
 #include <vector>
+#include <iostream>
 #include <random>
 #include <algorithm>
-#include <queue>
-#include <cmath>
-#include <cstring>
-#include <mutex>
-#include <memory>
 #include <thread>
+#include <mutex>
 #include <atomic>
-#include <iostream>
-#include <immintrin.h>
+#include <queue>
+#include <functional>
+#include <optional>
 
-#include "Global.h"
+#include "TunableHNSW/Distance.h"
+#include "TunableHNSW/OPQ.h"
 
-class Solution {
-public:
-  void build(int d, const std::vector<float>& base);
-  void search(const std::vector<float>& query, int* res);
+// This config header defines the structs for the different strategies
+// to be tested by the final solution.
+namespace MySolution {
 
-private:
-  static constexpr int M = 64;               
-  static constexpr int M0 = 128;              
-  static constexpr int ef_construction = 600; 
-  static constexpr int ef_search = 300;       
-  static constexpr int MAX_LEVEL = 16;       
+// The strategies to test, defined as config structs.
+// This combines the previous IntegratedConfig.h and the user's new hybrid config.
 
-  int d_ = 0;
-  size_t n_ = 0;
+enum class QuantizationStrategy { kNone, kOPQ };
+enum class SearchStrategy { kStandard, kDynamic };
 
-  const float* data_ptr_ = nullptr; 
-  std::vector<float> data_storage_;
+struct SIFT_Final_Config {
+    static constexpr int kDim = 128;
+    static constexpr int kDimVal = 128;
+    static constexpr int kM = 32;
+    static constexpr int kM0 = 64;
+    static constexpr int kEfConstruction = 500;
+    
+    static constexpr QuantizationStrategy kQuantizationVal = QuantizationStrategy::kNone;
+    static constexpr SearchStrategy kSearchStrategyVal = SearchStrategy::kDynamic;
+    
+    static constexpr int kPatience = 100;
+    static constexpr int kMaxEfSearch = 500;
 
+    // Unused PQ params
+    static constexpr int kPQSubquantizersVal = 0;
+    static constexpr size_t kQuantizerTrainSampleSizeVal = 0;
+};
+
+struct GLOVE_Final_Config {
+    static constexpr int kDim = 100;
+    static constexpr int kDimVal = 100;
+    static constexpr int kM = 48;
+    static constexpr int kM0 = 96;
+    static constexpr int kEfConstruction = 800;
+
+    static constexpr QuantizationStrategy kQuantizationVal = QuantizationStrategy::kNone;
+    static constexpr SearchStrategy kSearchStrategyVal = SearchStrategy::kDynamic;
+
+    static constexpr int kPatience = 200;
+    static constexpr int kMaxEfSearch = 2000;
+
+    // Unused PQ params
+    static constexpr int kPQSubquantizersVal = 0;
+    static constexpr size_t kQuantizerTrainSampleSizeVal = 0;
+};
+
+struct GLOVE_OPQ_Hybrid_Config {
+    static constexpr int kDim = 100;
+    static constexpr int kDimVal = 100;
+    static constexpr int kM = 48;
+    static constexpr int kM0 = 96;
+    static constexpr int kEfConstruction = 800;
+
+    static constexpr QuantizationStrategy kQuantizationVal = QuantizationStrategy::kOPQ;
+    static constexpr SearchStrategy kSearchStrategyVal = SearchStrategy::kDynamic;
+    
+    // OPQ Params
+    static constexpr int kPQSubquantizersVal = 20; 
+    static constexpr size_t kQuantizerTrainSampleSizeVal = 25000;
+
+    // Dynamic Search Params for noisy graph
+    static constexpr int kPatience = 250;
+    static constexpr int kMaxEfSearch = 1600;
+};
+
+} // namespace MySolution
+
+
+// The final, integrated HNSW implementation
+namespace MySolution {
+
+template <typename Config>
+class HNSW {
+ public:
+  HNSW();
+
+  void Build(const std::vector<float>& base_data);
+  void Search(const std::vector<float>& query, int k, int* result_indices);
+
+ private:
   struct Node {
     int level;
-    std::vector<int> flat_links; 
-    std::vector<int> link_counts;
-    std::unique_ptr<std::mutex> lock;
+    size_t offset;
   };
 
-  std::vector<Node> nodes_;
-
-  int entry_point_ = -1;
-  int max_level_ = -1;
-  double level_mult_;
-  std::mutex global_lock_;
-
   struct VisitedList {
-    std::vector<unsigned short> tags;
-    unsigned short current_tag = 0;
-
-    void resize(size_t n) { tags.resize(n, 0); }
-
-    void advance() {
-      current_tag++;
-      if (current_tag == 0) {
-        std::fill(tags.begin(), tags.end(), 0);
-        current_tag = 1;
-      }
-    }
-
+    std::vector<bool> tags;
+    void resize(size_t n) { tags.resize(n, false); }
+    void reset() { std::fill(tags.begin(), tags.end(), false); }
     inline bool visit(int id) {
-      if (tags[id] == current_tag) return true;
-      tags[id] = current_tag;
+      if (tags[id]) return true;
+      tags[id] = true;
       return false;
     }
   };
 
-  // --- AVX2 Distance ---
-  __attribute__((target("avx2,fma")))
-  inline float dist_func_sq(const float* a, const float* b, int d) const {
-      __m256 sum = _mm256_setzero_ps();
-      const float* end_safe = a + (d & ~7);
-      while (a < end_safe) {
-          __m256 v_a = _mm256_loadu_ps(a);
-          __m256 v_b = _mm256_loadu_ps(b);
-          __m256 diff = _mm256_sub_ps(v_a, v_b);
-          sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
-          a += 8; b += 8;
-      }
-      __m128 sum_low = _mm256_castps256_ps128(sum);
-      __m128 sum_high = _mm256_extractf128_ps(sum, 1);
-      __m128 v_res = _mm_add_ps(sum_low, sum_high);
-      v_res = _mm_hadd_ps(v_res, v_res);
-      v_res = _mm_hadd_ps(v_res, v_res);
-      float res = _mm_cvtss_f32(v_res);
-      int remainder = d & 7; 
-      for (int i = 0; i < remainder; ++i) {
-          float diff = a[i] - b[i];
-          res += diff * diff;
-      }
-      return res;
-  }
+  using Dist = TunableHNSW::Distance<Config::kDim, true>;
+  using PQ = std::conditional_t<
+      Config::kQuantizationVal == QuantizationStrategy::kOPQ,
+      TunableHNSW::OptimizedProductQuantizer<Config>,
+      std::nullptr_t>;
 
-  inline float dist_sq(int id_a, int id_b) const {
-      return dist_func_sq(data_ptr_ + id_a * d_, data_ptr_ + id_b * d_, d_);
-  }
+  const double level_mult_;
+  int max_level_ = -1;
+  int entry_point_ = -1;
 
-  inline float dist_query_sq(const float* query, int id_node) const {
-      return dist_func_sq(query, data_ptr_ + id_node * d_, d_);
-  }
+  std::vector<float> data_storage_;
+  const float* data_ptr_ = nullptr;
+  size_t num_points_ = 0;
 
-  inline int get_link_offset(int level) const {
-      return (level == 0) ? 0 : (M0 + (level - 1) * M);
-  }
+  std::vector<Node> nodes_;
+  std::vector<int> flat_graph_;
+  std::vector<int> link_counts_;
+  
+  std::optional<PQ> pq_;
+  std::vector<uint8_t> pq_codes_;
 
-  int get_random_level(std::mt19937& rng) {
-      std::uniform_real_distribution<double> dist(0.0, 1.0);
-      double r = -std::log(dist(rng)) * level_mult_;
-      return std::min(static_cast<int>(r), MAX_LEVEL);
-  }
-
-  // --- Build Phase Search (Standard) ---
-  std::priority_queue<std::pair<float, int>> search_layer(
-      const float* query_data, int entry_point, int ef, int level, VisitedList& visited
-  ) {
-      using QueueItem = std::pair<float, int>;
-      std::priority_queue<QueueItem> top_candidates;
-      std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
-
-      visited.advance();
-      float initial_dist = dist_query_sq(query_data, entry_point);
-      top_candidates.push({initial_dist, entry_point});
-      candidates.push({initial_dist, entry_point});
-      visited.visit(entry_point);
-
-      while (!candidates.empty()) {
-          auto [curr_dist, curr_id] = candidates.top();
-          if (curr_dist > top_candidates.top().first && top_candidates.size() >= ef) break;
-          candidates.pop();
-
-          const Node& node = nodes_[curr_id];
-          int size = node.link_counts[level]; 
-          int offset = get_link_offset(level);
-          const int* links = node.flat_links.data() + offset;
-
-          for (int i = 0; i < size; ++i) {
-              int neighbor_id = links[i];
-              if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i+1] * d_), _MM_HINT_T0);
-
-              if (!visited.visit(neighbor_id)) {
-                  float d = dist_query_sq(query_data, neighbor_id);
-                  if (top_candidates.size() < ef || d < top_candidates.top().first) {
-                      candidates.push({d, neighbor_id});
-                      top_candidates.push({d, neighbor_id});
-                      if (top_candidates.size() > ef) top_candidates.pop();
-                  }
-              }
-          }
-      }
-      return top_candidates;
-  }
-
-  // --- Combined Search Helper (WITH MOVE-TO-FRONT) ---
-  std::priority_queue<std::pair<float, int>> search_combined_layers(
-      const float* query_data, int entry_point, int ef, VisitedList& visited
-  ) {
-      using QueueItem = std::pair<float, int>;
-      std::priority_queue<QueueItem> top_candidates;
-      std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
-
-      visited.advance();
-      float initial_dist = dist_query_sq(query_data, entry_point);
-      
-      top_candidates.push({initial_dist, entry_point});
-      candidates.push({initial_dist, entry_point});
-      visited.visit(entry_point);
-
-      while (!candidates.empty()) {
-          auto [curr_dist, curr_id] = candidates.top();
-          if (curr_dist > top_candidates.top().first && top_candidates.size() >= ef) break;
-          candidates.pop();
-
-          const Node& node = nodes_[curr_id];
-          int node_max_level = node.level;
-
-          for (int l = 0; l <= node_max_level; ++l) {
-              int size = node.link_counts[l];
-              int offset = get_link_offset(l);
-              
-              // We need non-const access to perform Move-To-Front
-              // We cast away const here. Note: This assumes search is not running 
-              // concurrently with other thread-unsafe operations on the same vector.
-              int* links = const_cast<int*>(node.flat_links.data() + offset);
-
-              for (int i = 0; i < size; ++i) {
-                  int neighbor_id = links[i];
-                  if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i+1] * d_), _MM_HINT_T0);
-
-                  if (!visited.visit(neighbor_id)) {
-                      float d = dist_query_sq(query_data, neighbor_id);
-                      
-                      // Check if this neighbor is "good enough" to be in top candidates
-                      if (top_candidates.size() < ef || d < top_candidates.top().first) {
-                          candidates.push({d, neighbor_id});
-                          top_candidates.push({d, neighbor_id});
-                          if (top_candidates.size() > ef) top_candidates.pop();
-
-                          // --- MOVE TO FRONT HEURISTIC ---
-                          // If this link was useful, swap it to the front (index 0).
-                          // This keeps hot paths at the beginning of the cache line.
-                          if (i > 0) {
-                              std::swap(links[0], links[i]);
-                          }
-                      }
-                  }
-              }
-          }
-      }
-      return top_candidates;
-  }
-
-  void get_neighbors_heuristic(
-      int src,
-      std::vector<std::pair<float, int>>& candidates,
-      int level,
-      int* output_buffer,
-      int& output_count
-  ) {
-      int max_m = (level == 0) ? M0 : M;
-      output_count = 0;
-      if (candidates.empty()) return;
-      std::sort(candidates.begin(), candidates.end());
-
-      for (const auto& cand : candidates) {
-          if (output_count >= max_m) break;
-          int cand_id = cand.second;
-          float dist_to_src = cand.first;
-          bool good = true;
-          for (int j = 0; j < output_count; ++j) {
-              if (dist_sq(cand_id, output_buffer[j]) < dist_to_src) {
-                  good = false; break;
-              }
-          }
-          if (good) output_buffer[output_count++] = cand_id;
-      }
-  }
-
-  // --- Thread-Safe Connection (WITH STRICT SORTING) ---
-  void add_connection(int src, int dest, int level) {
-      Node& node = nodes_[src];
-      std::lock_guard<std::mutex> lock(*node.lock);
-
-      int count = node.link_counts[level];
-      int offset = get_link_offset(level);
-      int* links_ptr = node.flat_links.data() + offset;
-
-      for (int i = 0; i < count; ++i) if (links_ptr[i] == dest) return;
-
-      int max_m = (level == 0) ? M0 : M;
-      
-      if (count < max_m) {
-          // --- STRICT SORTED INSERTION ---
-          // Instead of appending, we find the correct spot by distance.
-          float dest_dist = dist_sq(src, dest);
-          int insert_pos = count;
-
-          // Find insertion point
-          for(int i = 0; i < count; ++i) {
-              // Note: We must re-calculate distance here to sort.
-              // Ideally, this is cached, but for strict sorting we compute it.
-              float d = dist_sq(src, links_ptr[i]);
-              if (d > dest_dist) {
-                  insert_pos = i;
-                  break;
-              }
-          }
-
-          // Shift elements right to make room
-          for (int j = count; j > insert_pos; --j) {
-              links_ptr[j] = links_ptr[j-1];
-          }
-          
-          links_ptr[insert_pos] = dest;
-          __atomic_store_n(&node.link_counts[level], count + 1, __ATOMIC_RELEASE);
-
-      } else {
-          // If full, heuristic handles sorting automatically
-          std::vector<std::pair<float, int>> candidates;
-          candidates.reserve(max_m + 1);
-          for (int i = 0; i < count; ++i) candidates.push_back({dist_sq(src, links_ptr[i]), links_ptr[i]});
-          candidates.push_back({dist_sq(src, dest), dest});
-
-          std::vector<int> new_links(max_m);
-          int new_count = 0;
-          get_neighbors_heuristic(src, candidates, level, new_links.data(), new_count);
-
-          for(int i=0; i<new_count; ++i) links_ptr[i] = new_links[i];
-          if (new_count != count) __atomic_store_n(&node.link_counts[level], new_count, __ATOMIC_RELEASE);
-      }
-  }
+  int GetRandomLevel_(std::mt19937& rng);
+  void Insert_(int node_id, 
+               std::vector<std::vector<std::vector<int>>>& temp_graph,
+               std::vector<std::mutex>& locks);
+  std::priority_queue<std::pair<float, int>> SearchLayerFP_(
+      const float* query, int entry_point, int ef, int level,
+      const std::vector<std::vector<std::vector<int>>>& temp_graph,
+      std::vector<std::mutex>& locks, VisitedList& visited);
+  void SelectNeighbors_(
+      std::priority_queue<std::pair<float, int>>& candidates,
+      std::vector<int>& target_list);
+  void FlattenGraph_(
+      const std::vector<std::vector<std::vector<int>>>& temp_graph);
+  
+  void SearchFP_(const std::vector<float>& query, int k, int* result_indices);
+  void SearchPQ_(const std::vector<float>& query, int k, int* result_indices);
 };
 
-inline void Solution::build(int d, const std::vector<float>& base) {
-    d_ = d;
-    data_storage_ = base;
-    data_ptr_ = data_storage_.data();
-    n_ = base.size() / d_;
-    nodes_.resize(n_);
-    level_mult_ = 1.0 / std::log(1.0 * M);
+// --- Implementation ---
 
-    std::mt19937 rng_init(42);
-    for (size_t i = 0; i < n_; ++i) {
-        int level = get_random_level(rng_init);
-        nodes_[i].level = level;
-        nodes_[i].link_counts.resize(level + 1, 0);
-        nodes_[i].lock = std::make_unique<std::mutex>(); 
-        size_t total_links = M0;
-        if (level > 0) total_links += (size_t)level * M;
-        nodes_[i].flat_links.resize(total_links);
-    }
 
-    entry_point_ = 0;
-    max_level_ = nodes_[0].level;
 
-    std::atomic<size_t> atomic_idx{1};       
-    std::atomic<size_t> progress_counter{0}; 
-    size_t total_work = n_ - 1;
+template <typename Config>
 
-    if constexpr (global::kDEBUG) {
-        std::cout << "Building HNSW (d=" << d_ << ", M=" << M << ") for " << n_ << " vectors..." << std::endl;
-    }
+HNSW<Config>::HNSW() : level_mult_(1.0 / std::log(1.0 * Config::kM)) {
 
-    unsigned int num_threads = std::thread::hardware_concurrency();
-    if (num_threads == 0) num_threads = 4;
+  if constexpr (Config::kQuantizationVal != QuantizationStrategy::kNone) {
 
-    auto worker_func = [&](int thread_id) {
-        VisitedList visited;
-        visited.resize(n_);
-        std::mt19937 rng(42 + thread_id); 
+    pq_.emplace();
 
-        while (true) {
-            size_t curr_obj = atomic_idx.fetch_add(1, std::memory_order_relaxed);
-            if (curr_obj >= n_) break;
+  }
 
-            int curr_level = nodes_[curr_obj].level;
-            int curr_ep = entry_point_;
-            int curr_max_level = max_level_;
-            const float* curr_vec = data_ptr_ + curr_obj * d_;
-
-            // 1. Descent
-            for (int l = curr_max_level; l > curr_level; l--) {
-                bool changed = true;
-                while (changed) {
-                    changed = false;
-                    float dist_ep = dist_query_sq(curr_vec, curr_ep);
-                    const Node& node_ep = nodes_[curr_ep];
-                    if (l >= node_ep.link_counts.size()) break;
-                    
-                    int offset = get_link_offset(l);
-                    int count = node_ep.link_counts[l];
-                    const int* links = node_ep.flat_links.data() + offset;
-                    
-                    for(int j=0; j<count; ++j) {
-                        int neighbor = links[j];
-                        float d = dist_query_sq(curr_vec, neighbor);
-                        if(d < dist_ep) {
-                            curr_ep = neighbor;
-                            dist_ep = d;
-                            changed = true;
-                        }
-                    }
-                }
-            }
-
-            // 2. Construction
-            for (int l = std::min(curr_level, curr_max_level); l >= 0; l--) {
-                auto top_candidates = search_layer(curr_vec, curr_ep, ef_construction, l, visited);
-                std::vector<std::pair<float, int>> potential;
-                potential.reserve(ef_construction + 1);
-                while(!top_candidates.empty()) {
-                    potential.push_back(top_candidates.top());
-                    top_candidates.pop();
-                }
-                
-                int offset = get_link_offset(l);
-                int* link_dst = nodes_[curr_obj].flat_links.data() + offset;
-                int count = 0;
-                get_neighbors_heuristic(curr_obj, potential, l, link_dst, count);
-                nodes_[curr_obj].link_counts[l] = count;
-                
-                for(int j=0; j<count; ++j) add_connection(link_dst[j], curr_obj, l);
-                if (!potential.empty()) curr_ep = potential[0].second;
-            }
-
-            if (curr_level > max_level_) {
-                std::lock_guard<std::mutex> lock(global_lock_);
-                if (curr_level > max_level_) {
-                    max_level_ = curr_level;
-                    entry_point_ = curr_obj;
-                }
-            }
-            // Progress display omitted for brevity
-        }
-    };
-
-    std::vector<std::thread> threads;
-    threads.reserve(num_threads);
-    for(unsigned int i = 0; i < num_threads; ++i) {
-        threads.emplace_back(worker_func, i);
-    }
-    for(auto& t : threads) {
-        t.join();
-    }
-    if constexpr (global::kDEBUG) std::cout << "Build: 100% - Done.\n";
 }
 
-inline void Solution::search(const std::vector<float>& query, int* res) {
-    static thread_local VisitedList visited;
-    if (visited.tags.size() != n_) visited.resize(n_);
-    
-    int curr_ep = entry_point_;
-    const float* q_data = query.data();
 
-    // Perform ONE search on the combined graph (all layers)
-    auto top_candidates = search_combined_layers(q_data, curr_ep, ef_search, visited);
 
-    size_t k = 0;
-    std::vector<std::pair<float, int>> sorted;
-    sorted.reserve(top_candidates.size());
+template <typename Config>
+
+void HNSW<Config>::Build(const std::vector<float>& base_data) {
+
+  data_storage_ = base_data;
+
+  data_ptr_ = data_storage_.data();
+
+  num_points_ = base_data.size() / Config::kDim;
+
+  nodes_.resize(num_points_);
+
+  
+
+  std::mt19937 rng(100);
+
+  int max_level = 0;
+
+  for (size_t i = 0; i < num_points_; ++i) {
+
+    nodes_[i].level = GetRandomLevel_(rng);
+
+    if (nodes_[i].level > max_level) max_level = nodes_[i].level;
+
+  }
+
+  max_level_ = max_level;
+
+  
+
+  if (num_points_ > 0) {
+
+    entry_point_ = 0;
+
+    for(size_t i = 1; i < num_points_; ++i) {
+
+      if(nodes_[i].level > nodes_[entry_point_].level) entry_point_ = i;
+
+    }
+
+  }
+
+
+
+  std::vector<std::vector<std::vector<int>>> temp_graph(num_points_);
+
+  for(size_t i = 0; i < num_points_; ++i) {
+
+      temp_graph[i].resize(nodes_[i].level + 1);
+
+  }
+
+  std::vector<std::mutex> locks(num_points_);
+
+  std::atomic<size_t> atomic_idx{0};
+
+
+
+  unsigned int num_threads = std::thread::hardware_concurrency();
+
+  auto worker_func = [&]() {
+
+    while (true) {
+
+      size_t current_node_id = atomic_idx.fetch_add(1);
+
+      if (current_node_id >= num_points_) break;
+
+      Insert_(current_node_id, temp_graph, locks);
+
+    }
+
+  };
+
+
+
+  std::vector<std::thread> threads;
+
+  for (unsigned int i = 0; i < num_threads; ++i) {
+
+    threads.emplace_back(worker_func);
+
+  }
+
+  for (auto& t : threads) {
+
+    t.join();
+
+  }
+
+
+
+  FlattenGraph_(temp_graph);
+
+
+
+  if constexpr (Config::kQuantizationVal != QuantizationStrategy::kNone) {
+
+      pq_->Train(data_ptr_, num_points_);
+
+      pq_codes_.resize(num_points_ * Config::kPQSubquantizersVal);
+
+      auto encode_worker = [&](size_t start, size_t end) {
+
+          for(size_t i = start; i < end; ++i) {
+
+              auto code = pq_->Encode(data_ptr_ + i * Config::kDim);
+
+              std::copy(code.begin(), code.end(), pq_codes_.data() + i * Config::kPQSubquantizersVal);
+
+          }
+
+      };
+
+      threads.clear();
+
+      size_t block_size = num_points_ / num_threads;
+
+      for (unsigned int i = 0; i < num_threads; ++i) {
+
+          size_t start = i * block_size;
+
+          size_t end = (i == num_threads - 1) ? num_points_ : start + block_size;
+
+          threads.emplace_back(encode_worker, start, end);
+
+      }
+
+      for(auto& t : threads) t.join();
+
+  }
+
+}
+
+
+
+template <typename Config>
+
+void HNSW<Config>::Search(const std::vector<float>& query, int k, int* result_indices) {
+
+    if constexpr (Config::kQuantizationVal != QuantizationStrategy::kNone) {
+
+        SearchPQ_(query, k, result_indices);
+
+    } else {
+
+        SearchFP_(query, k, result_indices);
+
+    }
+
+}
+
+
+
+template <typename Config>
+
+int HNSW<Config>::GetRandomLevel_(std::mt19937& rng) {
+
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+
+  return static_cast<int>(-std::log(dist(rng)) * level_mult_);
+
+}
+
+
+
+template <typename Config>
+
+void HNSW<Config>::Insert_(int node_id,
+
+                           std::vector<std::vector<std::vector<int>>>& temp_graph,
+
+                           std::vector<std::mutex>& locks) {
+
+  
+
+  thread_local VisitedList visited;
+
+  if(visited.tags.size() != num_points_) visited.resize(num_points_);
+
+  
+
+  const float* query_vector = data_ptr_ + node_id * Config::kDim;
+
+  int current_ep = entry_point_;
+
+  int node_level = nodes_[node_id].level;
+
+  
+
+  if (current_ep == -1) return;
+
+
+
+  for (int level = max_level_; level > node_level; --level) {
+
+    bool changed = true;
+
+    while(changed) {
+
+        changed = false;
+
+        float min_dist = Dist::L2Sq(query_vector, data_ptr_ + current_ep * Config::kDim);
+
+        std::lock_guard<std::mutex> lock(locks[current_ep]);
+
+        if (level >= temp_graph[current_ep].size()) continue;
+
+        const auto& neighbors = temp_graph[current_ep][level];
+
+        for (int neighbor_id : neighbors) {
+
+            float dist = Dist::L2Sq(query_vector, data_ptr_ + neighbor_id * Config::kDim);
+
+            if (dist < min_dist) {
+
+                min_dist = dist;
+
+                current_ep = neighbor_id;
+
+                changed = true;
+
+            }
+
+        }
+
+    }
+
+  }
+
+
+
+  for (int level = std::min(node_level, max_level_); level >= 0; --level) {
+
+    visited.reset();
+
+    auto top_candidates = SearchLayerFP_(query_vector, current_ep, Config::kEfConstruction, level, temp_graph, locks, visited);
+
     
+
+    std::vector<int> neighbors;
+
+    neighbors.reserve(Config::kM0); // Reserve max possible
+
+    SelectNeighbors_(top_candidates, neighbors);
+
+    
+
+    {
+
+        std::lock_guard<std::mutex> lock(locks[node_id]);
+
+        temp_graph[node_id][level] = neighbors;
+
+    }
+
+
+
+    for (int neighbor_id : neighbors) {
+
+      std::lock_guard<std::mutex> lock(locks[neighbor_id]);
+
+      if (level >= temp_graph[neighbor_id].size()) continue;
+
+      auto& neighbor_links = temp_graph[neighbor_id][level];
+
+      int neighbor_M = (level == 0) ? Config::kM0 : Config::kM;
+
+      if (neighbor_links.size() < (size_t)neighbor_M) {
+
+        neighbor_links.push_back(node_id);
+
+      } else {
+
+        float new_node_dist = Dist::L2Sq(data_ptr_ + neighbor_id * Config::kDim, query_vector);
+
+        std::priority_queue<std::pair<float, int>> temp_pq;
+
+        for(int link : neighbor_links) {
+
+            temp_pq.push({Dist::L2Sq(data_ptr_ + neighbor_id * Config::kDim, data_ptr_ + link * Config::kDim), link});
+
+        }
+
+        if (new_node_dist < temp_pq.top().first) {
+
+            temp_pq.pop();
+
+            temp_pq.push({new_node_dist, node_id});
+
+            neighbor_links.clear();
+
+            while(!temp_pq.empty()) {
+
+                neighbor_links.push_back(temp_pq.top().second);
+
+                temp_pq.pop();
+
+            }
+
+        }
+
+      }
+
+    }
+
+    if(!top_candidates.empty()) {
+
+        current_ep = top_candidates.top().second;
+
+    }
+
+  }
+
+}
+
+
+
+template <typename Config>
+
+std::priority_queue<std::pair<float, int>> HNSW<Config>::SearchLayerFP_(
+
+    const float* query, int entry_point, int ef, int level,
+
+    const std::vector<std::vector<std::vector<int>>>& temp_graph,
+
+    std::vector<std::mutex>& locks, VisitedList& visited) {
+
+  
+
+  using QueueItem = std::pair<float, int>;
+
+  std::priority_queue<QueueItem> top_results;
+
+  std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
+
+
+
+  float initial_dist = Dist::L2Sq(query, data_ptr_ + entry_point * Config::kDim);
+
+  candidates.push({initial_dist, entry_point});
+
+  top_results.push({initial_dist, entry_point});
+
+  visited.visit(entry_point);
+
+
+
+  while (!candidates.empty()) {
+
+    auto [dist, id] = candidates.top();
+
+    candidates.pop();
+
+    if (dist > top_results.top().first && top_results.size() >= (size_t)ef) break;
+
+    
+
+    std::lock_guard<std::mutex> lock(locks[id]);
+
+    if (level >= temp_graph[id].size()) continue;
+
+
+
+    const auto& neighbors = temp_graph[id][level];
+
+    for (int neighbor_id : neighbors) {
+
+      if (!visited.visit(neighbor_id)) {
+
+        float neighbor_dist = Dist::L2Sq(query, data_ptr_ + neighbor_id * Config::kDim);
+
+        if (top_results.size() < (size_t)ef || neighbor_dist < top_results.top().first) {
+
+          candidates.push({neighbor_dist, neighbor_id});
+
+          top_results.push({neighbor_dist, neighbor_id});
+
+          if (top_results.size() > (size_t)ef) top_results.pop();
+
+        }
+
+      }
+
+    }
+
+  }
+
+  return top_results;
+
+}
+
+
+
+template <typename Config>
+
+void HNSW<Config>::SelectNeighbors_(
+
+    std::priority_queue<std::pair<float, int>>& candidates,
+
+    std::vector<int>& target_list) {
+
+  
+
+  if (candidates.empty()) return;
+
+
+
+  std::vector<std::pair<float, int>> candidate_vec;
+
+  candidate_vec.reserve(candidates.size());
+
+  while(!candidates.empty()) {
+
+    candidate_vec.push_back(candidates.top());
+
+    candidates.pop();
+
+  }
+
+  std::reverse(candidate_vec.begin(), candidate_vec.end());
+
+
+
+  for (const auto& cand : candidate_vec) {
+
+    if (target_list.size() >= (size_t)Config::kM) break;
+
+    bool is_good = true;
+
+    for (int selected_neighbor : target_list) {
+
+      if (Dist::L2Sq(data_ptr_ + cand.second * Config::kDim, data_ptr_ + selected_neighbor * Config::kDim) < cand.first) {
+
+        is_good = false;
+
+        break;
+
+      }
+
+    }
+
+    if (is_good) {
+
+      target_list.push_back(cand.second);
+
+    }
+
+  }
+
+}
+
+
+
+template <typename Config>
+
+void HNSW<Config>::FlattenGraph_(const std::vector<std::vector<std::vector<int>>>& temp_graph) {
+
+  link_counts_.resize(num_points_ * (max_level_ + 1), 0);
+
+  size_t total_links = 0;
+
+  for (size_t i = 0; i < num_points_; ++i) {
+
+    if(nodes_[i].level > max_level_) continue;
+
+    for (int level = 0; level <= nodes_[i].level; ++level) {
+
+      if (level < temp_graph[i].size()) total_links += temp_graph[i][level].size();
+
+    }
+
+  }
+
+  
+
+  flat_graph_.resize(total_links);
+
+  size_t current_offset = 0;
+
+
+
+  for (size_t i = 0; i < num_points_; ++i) {
+
+    nodes_[i].offset = current_offset;
+
+    if(nodes_[i].level > max_level_) continue;
+
+    for (int level = 0; level <= nodes_[i].level; ++level) {
+
+      if (level < temp_graph[i].size()) {
+
+        const auto& neighbors = temp_graph[i][level];
+
+        link_counts_[i * (max_level_ + 1) + level] = neighbors.size();
+
+        for (int neighbor : neighbors) flat_graph_[current_offset++] = neighbor;
+
+      }
+
+    }
+
+  }
+
+}
+
+
+
+template<typename Config>
+
+void HNSW<Config>::SearchFP_(const std::vector<float>& query, int k, int* result_indices) {
+
+  thread_local VisitedList visited;
+
+  if (visited.tags.size() != num_points_) visited.resize(num_points_);
+
+  visited.reset();
+
+
+
+  const float* query_data = query.data();
+
+  int current_ep = entry_point_;
+
+
+
+  if (current_ep == -1) {
+
+    for(int i = 0; i < k; ++i) result_indices[i] = -1;
+
+    return;
+
+  }
+
+
+
+  float current_dist = Dist::L2Sq(query_data, data_ptr_ + current_ep * Config::kDim);
+
+
+
+  for (int level = max_level_; level > 0; --level) {
+
+    bool changed = true;
+
+    while (changed) {
+
+      changed = false;
+
+      size_t node_offset = nodes_[current_ep].offset;
+
+      int link_offset_level = 0;
+
+      for (int i = 0; i < level; ++i) link_offset_level += link_counts_[current_ep * (max_level_ + 1) + i];
+
+      const int* neighbors = flat_graph_.data() + node_offset + link_offset_level;
+
+      int count = link_counts_[current_ep * (max_level_ + 1) + level];
+
+
+
+      for (int i = 0; i < count; ++i) {
+
+        int neighbor_id = neighbors[i];
+
+        float dist = Dist::L2Sq(query_data, data_ptr_ + neighbor_id * Config::kDim);
+
+        if (dist < current_dist) {
+
+          current_dist = dist;
+
+          current_ep = neighbor_id;
+
+          changed = true;
+
+        }
+
+      }
+
+    }
+
+  }
+
+
+
+  using QueueItem = std::pair<float, int>;
+
+  std::priority_queue<QueueItem> top_candidates;
+
+  std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
+
+
+
+  top_candidates.push({current_dist, current_ep});
+
+  candidates.push({current_dist, current_ep});
+
+  visited.visit(current_ep);
+
+
+
+  int patience = Config::kPatience;
+
+  float best_dist_so_far = current_dist;
+
+
+
+  while(!candidates.empty()) {
+
+    auto [dist, id] = candidates.top();
+
+    candidates.pop();
+
+
+
+    if (dist > best_dist_so_far && top_candidates.size() >= (size_t)Config::kMaxEfSearch) {
+
+        if (--patience == 0) break;
+
+    }
+
+    
+
+    size_t node_offset = nodes_[id].offset;
+
+    const int* neighbors = flat_graph_.data() + node_offset;
+
+    int count = link_counts_[id * (max_level_ + 1) + 0];
+
+
+
+    for (int i = 0; i < count; ++i) {
+
+        int neighbor_id = neighbors[i];
+
+        if (i + 4 < count) _mm_prefetch((const char*)(data_ptr_ + neighbors[i+4] * Config::kDim), _MM_HINT_T0);
+
+        
+
+        if(!visited.visit(neighbor_id)) {
+
+            float neighbor_dist = Dist::L2Sq(query_data, data_ptr_ + neighbor_id * Config::kDim);
+
+            if (top_candidates.size() < (size_t)Config::kMaxEfSearch || neighbor_dist < best_dist_so_far) {
+
+                candidates.push({neighbor_dist, neighbor_id});
+
+                top_candidates.push({neighbor_dist, neighbor_id});
+
+                if (top_candidates.size() > (size_t)Config::kMaxEfSearch) top_candidates.pop();
+
+                best_dist_so_far = top_candidates.top().first;
+
+            }
+
+        }
+
+    }
+
+  }
+
+
+
+  size_t result_count = 0;
+
+  std::vector<QueueItem> sorted_results;
+
+  sorted_results.reserve(top_candidates.size());
+
+  while(!top_candidates.empty()) {
+
+    sorted_results.push_back(top_candidates.top());
+
+    top_candidates.pop();
+
+  }
+
+  std::reverse(sorted_results.begin(), sorted_results.end());
+
+
+
+  for (const auto& p : sorted_results) {
+
+    if (result_count >= (size_t)k) break;
+
+    result_indices[result_count++] = p.second;
+
+  }
+
+  while(result_count < (size_t)k) {
+
+    result_indices[result_count++] = -1;
+
+  }
+
+}
+
+
+
+template<typename Config>
+
+void HNSW<Config>::SearchPQ_(const std::vector<float>& query, int k, int* result_indices) {
+
+    thread_local VisitedList visited;
+
+    if(visited.tags.size() != num_points_) visited.resize(num_points_);
+
+    visited.reset();
+
+
+
+    const float* query_data = query.data();
+
+    auto dist_table = pq_->BuildDistanceTable(query_data);
+
+    auto query_dist_sq_pq = [&](int node_id) {
+
+        const uint8_t* code = pq_codes_.data() + node_id * Config::kPQSubquantizersVal;
+
+        return pq_->GetDistanceFromTable(dist_table, code);
+
+    };
+
+
+
+    int current_ep = entry_point_;
+
+    if(current_ep == -1) { /* ... handle empty ... */ return; }
+
+
+
+    float current_dist = query_dist_sq_pq(current_ep);
+
+
+
+    for (int level = max_level_; level > 0; --level) {
+
+        bool changed = true;
+
+        while(changed) {
+
+            changed = false;
+
+            size_t node_offset = nodes_[current_ep].offset;
+
+            int link_offset_level = 0;
+
+            for(int i=0; i<level; ++i) link_offset_level += link_counts_[current_ep * (max_level_ + 1) + i];
+
+            const int* neighbors = flat_graph_.data() + node_offset + link_offset_level;
+
+            int count = link_counts_[current_ep * (max_level_ + 1) + level];
+
+            for (int i = 0; i < count; ++i) {
+
+                if (neighbors[i] < 0 || (size_t)neighbors[i] >= num_points_) continue;
+
+                float dist = query_dist_sq_pq(neighbors[i]);
+
+                if (dist < current_dist) {
+
+                    current_dist = dist;
+
+                    current_ep = neighbors[i];
+
+                    changed = true;
+
+                }
+
+            }
+
+        }
+
+    }
+
+
+
+    using QueueItem = std::pair<float, int>;
+
+    std::priority_queue<QueueItem> top_candidates;
+
+    std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>> candidates;
+
+
+
+    top_candidates.push({current_dist, current_ep});
+
+    candidates.push({current_dist, current_ep});
+
+    visited.visit(current_ep);
+
+
+
+    int patience = Config::kPatience;
+
+    float best_dist_so_far = current_dist;
+
+
+
+    while(!candidates.empty()) {
+
+        auto [dist, id] = candidates.top();
+
+        candidates.pop();
+
+        if (dist > best_dist_so_far) {
+
+            if (--patience == 0) break;
+
+        }
+
+        
+
+        size_t node_offset = nodes_[id].offset;
+
+        const int* neighbors = flat_graph_.data() + node_offset;
+
+        int count = link_counts_[id * (max_level_ + 1) + 0];
+
+
+
+        for (int i = 0; i < count; ++i) {
+
+            int neighbor_id = neighbors[i];
+
+            if (i + 4 < count) _mm_prefetch((const char*)(pq_codes_.data() + neighbors[i+4] * Config::kPQSubquantizersVal), _MM_HINT_T0);
+
+            if(!visited.visit(neighbor_id)) {
+
+                float neighbor_dist = query_dist_sq_pq(neighbor_id);
+
+                if (top_candidates.size() < (size_t)Config::kMaxEfSearch || neighbor_dist < best_dist_so_far) {
+
+                    candidates.push({neighbor_dist, neighbor_id});
+
+                    top_candidates.push({neighbor_dist, neighbor_id});
+
+                    if (top_candidates.size() > (size_t)Config::kMaxEfSearch) top_candidates.pop();
+
+                    best_dist_so_far = top_candidates.top().first;
+
+                }
+
+            }
+
+        }
+
+    }
+
+    
+
+    // Reranking Step
+
+    std::vector<QueueItem> candidates_to_rerank;
+
+    candidates_to_rerank.reserve(top_candidates.size());
+
     while(!top_candidates.empty()) {
-        sorted.push_back(top_candidates.top());
+
+        candidates_to_rerank.push_back(top_candidates.top());
+
         top_candidates.pop();
+
     }
-    std::sort(sorted.begin(), sorted.end());
+
     
-    for (const auto& p : sorted) {
-        if (k >= 10) break;
-        res[k++] = p.second;
+
+    for (const auto& item : candidates_to_rerank) {
+
+        float exact_dist = Dist::L2Sq(query_data, data_ptr_ + item.second * Config::kDim);
+
+        if (top_candidates.size() < (size_t)k || exact_dist < top_candidates.top().first) {
+
+            top_candidates.push({exact_dist, item.second});
+
+            if (top_candidates.size() > (size_t)k) top_candidates.pop();
+
+        }
+
     }
-    while (k < 10) res[k++] = -1;
+
+
+
+    size_t result_count = 0;
+
+    std::vector<QueueItem> sorted_results;
+
+    sorted_results.reserve(top_candidates.size());
+
+    while(!top_candidates.empty()) {
+
+        sorted_results.push_back(top_candidates.top());
+
+        top_candidates.pop();
+
+    }
+
+    std::reverse(sorted_results.begin(), sorted_results.end());
+
+
+
+    for (const auto& p : sorted_results) {
+
+        if (result_count >= (size_t)k) break;
+
+        result_indices[result_count++] = p.second;
+
+    }
+
+    while(result_count < (size_t)k) result_indices[result_count++] = -1;
+
 }

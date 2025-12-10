@@ -1,26 +1,32 @@
-#include <iostream> // std::cout
-#include <vector> // std::vector
-#include <string> // std::string
-#include <fstream> // std::ifstream
-#include <chrono> // std::chrono
-#include <format> // std::format
-#include <unordered_set> // std::unordered_set
+#include <iostream>
+#include <vector>
+#include <string>
+#include <fstream>
+#include <chrono>
+#include <format>
+#include <unordered_set>
 
-#include "Global.h" // global::kDATA_SET_INFOS
-//#include "EmptySolution.h" // Solution
-//#include "NaiveSolution.h" // Solution
-//#include "QuickSolution.h" // Solution
-//#include "ConvexGrouping.h" // Solution
-//#include "HNSWSolution.h" // Solution
-//#include "HNSWOptiSolution.h" // Solution
-#include "HNSWDynamicEFSearch.h" // Solution
+#include "TestSolution.h"
+#include "Global.h"
 
 /* Function Declarations */
 void run(const global::DataSetInfo& dataset);
 
+#include <iostream>
+#include <fstream>
+#include <string>
+
+// Helper function to send commands to perf
+void send_perf_command(const std::string& cmd) {
+    std::ofstream pipe("perf_ctl"); // Open the named pipe
+    if (pipe.is_open()) {
+        pipe << cmd << std::endl;
+        pipe.close();
+    }
+}
+
 /* Main Function */
 int main() {
-  //run(global::kTEST_INFO);
   run(global::kSIFT_INFO);
   return 0;
 }
@@ -95,15 +101,19 @@ void run(const global::DataSetInfo& info) {
   using std::chrono::duration_cast;
   using std::chrono::duration;
   using std::chrono::high_resolution_clock;
-  Solution solution;
+  FinalSolution::Sift::Solution solution;
   std::vector<std::vector<int>> res(n_queries,
                                     std::vector<int>(global::kCRITERION));
   auto st = high_resolution_clock::now();
-  solution.build(dims, base);
+  solution.Build(base);
   auto build_ed = high_resolution_clock::now();
+  /* Start tracking cache misses. */
+  send_perf_command("enable");
   for (int i = 0; i < n_queries; ++i) {
-    solution.search(samples[i], res[i].data());
+    solution.Search(samples[i], global::kCRITERION, res[i].data());
   }
+  /* End of tracking cache misses. */
+  send_perf_command("disable");
   auto search_ed = high_resolution_clock::now();
   /* Analyze the accuracy. */
   size_t correct_count = 0;
@@ -117,19 +127,19 @@ void run(const global::DataSetInfo& info) {
   /* Output the result. */
   std::cout << std::format(
     "Total Time: {}\n",
-    duration_cast<duration<double>>(search_ed - st)
+    duration_cast<duration<double>>(search_ed - st).count()
   );
   std::cout << std::format(
     "Build Time: {}\n",
-    duration_cast<duration<double>>(build_ed - st)
+    duration_cast<duration<double>>(build_ed - st).count()
   );
   std::cout << std::format(
     "Total Search Time: {}\n",
-    duration_cast<duration<double>>(search_ed - build_ed)
+    duration_cast<duration<double>>(search_ed - build_ed).count()
   );
   std::cout << std::format(
     "Average Search Time: {}\n",
-    duration_cast<duration<double>>(search_ed - build_ed) / n_queries
+    duration_cast<duration<double>>(search_ed - build_ed).count() / n_queries
   );
   std::cout << std::format("Precision: {}\n", precision);
   if constexpr (global::kDEBUG) save_res(res);
