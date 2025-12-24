@@ -21,16 +21,23 @@ class Solution {
 private:
     // --- CONSTANTS ---
     static constexpr int M = 64;
-    static constexpr int M0 = 128;
+    static constexpr int M0 = 256;
     static constexpr int ef_construction = 600;
     static constexpr int ef_search = 300;
-    static constexpr int MAX_LEVEL = 16;
+    static constexpr int MAX_LEVEL = 8;
 
     // --- DATA ---
     int d_ = 0;
     size_t n_ = 0;
-    const float* data_ptr_ = nullptr;
-    std::vector<float> data_storage_;
+    
+    // Scalar Quantization Data
+    std::vector<uint16_t> data_sq_;
+    const uint16_t* data_sq_ptr_ = nullptr;
+    
+    // Quantization Parameters (per dimension)
+    std::vector<float> min_vals_;
+    std::vector<float> scale_vals_;    // (max - min) / 65535
+    std::vector<float> scale_sq_vals_; // scale_vals_ ^ 2
 
     struct Node {
         int level;
@@ -91,7 +98,7 @@ public:
         double avg_ratio = stats_.sum_ratios / stats_.count;
 
         std::cout << "\n======================================================\n";
-        std::cout << "              HNSW SEARCH PERFORMANCE                 \n";
+        std::cout << "              HNSW SQ16 SEARCH PERFORMANCE            \n";
         std::cout << "======================================================\n";
         std::cout << "Total Queries:           " << stats_.count << "\n";
         std::cout << "Avg Layer 0 Hops:        " << std::fixed << std::setprecision(1) << avg_hops << "\n";
@@ -123,9 +130,43 @@ public:
     // --- BUILD FUNCTION ---
     void build(int d, const std::vector<float>& base) {
         d_ = d;
-        data_storage_ = base;
-        data_ptr_ = data_storage_.data();
         n_ = base.size() / d_;
+        
+        // 1. Compute Statistics (Min, Max) for Quantization
+        min_vals_.assign(d, std::numeric_limits<float>::max());
+        std::vector<float> max_vals(d, std::numeric_limits<float>::lowest());
+        
+        for (size_t i = 0; i < n_; ++i) {
+            const float* vec = base.data() + i * d;
+            for (int j = 0; j < d; ++j) {
+                if (vec[j] < min_vals_[j]) min_vals_[j] = vec[j];
+                if (vec[j] > max_vals[j]) max_vals[j] = vec[j];
+            }
+        }
+        
+        scale_vals_.resize(d);
+        scale_sq_vals_.resize(d);
+        for (int j = 0; j < d; ++j) {
+            float range = max_vals[j] - min_vals_[j];
+            if (range < 1e-9f) range = 1e-9f; // Avoid division by zero
+            scale_vals_[j] = range / 65535.0f;
+            scale_sq_vals_[j] = scale_vals_[j] * scale_vals_[j];
+        }
+
+        // 2. Quantize Data
+        data_sq_.resize(n_ * d);
+        data_sq_ptr_ = data_sq_.data();
+        
+        for (size_t i = 0; i < n_; ++i) {
+            const float* src = base.data() + i * d;
+            uint16_t* dst = data_sq_.data() + i * d;
+            for (int j = 0; j < d; ++j) {
+                float val = (src[j] - min_vals_[j]) / scale_vals_[j];
+                dst[j] = static_cast<uint16_t>(std::round(val));
+            }
+        }
+
+        // 3. Initialize Graph
         nodes_.resize(n_);
         level_mult_ = 1.0 / std::log(1.0 * M);
 
@@ -146,7 +187,7 @@ public:
         std::atomic<size_t> atomic_idx{ 1 };
         
         if constexpr (global::kDEBUG) {
-            std::cout << "Building HNSW (d=" << d_ << ", M=" << M << ") for " << n_ << " vectors..." << std::endl;
+            std::cout << "Building HNSW (d=" << d_ << ", M=" << M << ") for " << n_ << " vectors (SQ16)..." << std::endl;
         }
 
         unsigned int num_threads = std::thread::hardware_concurrency();
@@ -164,14 +205,31 @@ public:
                 int curr_level = nodes_[curr_obj].level;
                 int curr_ep = entry_point_;
                 int curr_max_level = max_level_;
-                const float* curr_vec = data_ptr_ + curr_obj * d_;
+                
+                // Note: We use the *quantized* data for distance calculations during build too
+                // to act as the source of truth, though we could pass the float vector here.
+                // However, the distance functions are now updated to use stored SQ data.
+                // For the "current vector", we need to be careful.
+                // dist_query_sq expects a float query. We can recover the float approximation
+                // of curr_obj or use the original base if we had access.
+                // To keep it simple and consistent, we'll dequantize curr_obj on the fly 
+                // into a thread-local float buffer or use a specific dist function.
+                
+                // Let's create a temporary float buffer for the current object to act as "query"
+                // Optimization: The dist_query_sq now expects a transformed query (q-min)/scale.
+                // For the current object (which is a node), the transformed query is simply its SQ values cast to float.
+                std::vector<float> curr_vec_trans(d_);
+                const uint16_t* curr_sq = data_sq_ptr_ + curr_obj * d_;
+                for(int j=0; j<d_; ++j) {
+                     curr_vec_trans[j] = (float)curr_sq[j];
+                }
 
                 // 1. Descent (Greedy)
                 for (int l = curr_max_level; l > curr_level; l--) {
                     bool changed = true;
                     while (changed) {
                         changed = false;
-                        float dist_ep = dist_query_sq(curr_vec, curr_ep);
+                        float dist_ep = dist_query_sq(curr_vec_trans.data(), curr_ep);
                         const Node& node_ep = nodes_[curr_ep];
                         // Safety check for concurrency race on max_level
                         if (l >= node_ep.link_counts.size()) break;
@@ -182,7 +240,7 @@ public:
 
                         for (int j = 0; j < count; ++j) {
                             int neighbor = links[j];
-                            float d = dist_query_sq(curr_vec, neighbor);
+                            float d = dist_query_sq(curr_vec_trans.data(), neighbor);
                             if (d < dist_ep) {
                                 curr_ep = neighbor;
                                 dist_ep = d;
@@ -194,7 +252,7 @@ public:
 
                 // 2. Construction
                 for (int l = std::min(curr_level, curr_max_level); l >= 0; l--) {
-                    auto top_candidates = search_layer_build(curr_vec, curr_ep, ef_construction, l, visited);
+                    auto top_candidates = search_layer_build(curr_vec_trans.data(), curr_ep, ef_construction, l, visited);
                     std::vector<std::pair<float, int>> potential;
                     potential.reserve(ef_construction + 1);
                     while (!top_candidates.empty()) {
@@ -222,49 +280,28 @@ public:
             }
         };
 
-            std::vector<std::thread> threads;
+        std::vector<std::thread> threads;
+        threads.reserve(num_threads);
+        for (unsigned int i = 0; i < num_threads; ++i) {
+            threads.emplace_back(worker_func, i);
+        }
 
-            threads.reserve(num_threads);
-
-            for (unsigned int i = 0; i < num_threads; ++i) {
-
-              threads.emplace_back(worker_func, i);
-
-            }
-
-        
-
-            std::thread progress_thread([&]() {
-
-              while (true) {
-
+        std::thread progress_thread([&]() {
+            while (true) {
                 size_t curr = atomic_idx.load(std::memory_order_relaxed);
-
                 if (curr > n_) curr = n_;
-
                 float progress = (n_ > 0) ? ((float)curr / n_ * 100.0f) : 100.0f;
-
                 std::cout << "\rBuild Progress: " << std::fixed << std::setprecision(1) << progress << "%" << std::flush;
-
                 if (curr >= n_) break;
-
                 std::this_thread::sleep_for(std::chrono::milliseconds(200));
-
-              }
-
-              std::cout << "\rBuild Progress: 100.0%       " << std::endl;
-
-            });
-
-        
-
-            for (auto& t : threads) {
-
-              t.join();
-
             }
+            std::cout << "\rBuild Progress: 100.0%       " << std::endl;
+        });
 
-            progress_thread.join();
+        for (auto& t : threads) {
+            t.join();
+        }
+        progress_thread.join();
         if constexpr (global::kDEBUG) std::cout << "Build: 100% - Done.\n";
     }
 
@@ -279,7 +316,14 @@ public:
 
         int curr_ep = entry_point_;
         const float* q_data = query.data();
-        float cur_dist = dist_query_sq(q_data, curr_ep);
+        
+        // Transform query: q_trans = (q - min) / scale
+        std::vector<float> q_trans(d_);
+        for(int i = 0; i < d_; ++i) {
+            q_trans[i] = (q_data[i] - min_vals_[i]) / scale_vals_[i];
+        }
+        
+        float cur_dist = dist_query_sq(q_trans.data(), curr_ep);
 
         visited.advance();
         visited.visit(curr_ep);
@@ -300,9 +344,9 @@ public:
 
                 for (int i = 0; i < count; ++i) {
                     int neighbor = links[i];
-                    if (i + 1 < count) _mm_prefetch((const char*)(data_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
+                    if (i + 1 < count) _mm_prefetch((const char*)(data_sq_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
 
-                    float d = dist_query_sq(q_data, neighbor);
+                    float d = dist_query_sq(q_trans.data(), neighbor);
                     if (d < cur_dist) {
                         cur_dist = d;
                         curr_ep = neighbor;
@@ -340,11 +384,11 @@ public:
 
             for (int i = 0; i < size; ++i) {
                 int neighbor_id = links[i];
-                if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
+                if (i + 1 < size) _mm_prefetch((const char*)(data_sq_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
 
                 if (!visited.visit(neighbor_id)) {
                     local_hops++;
-                    float d = dist_query_sq(q_data, neighbor_id);
+                    float d = dist_query_sq(q_trans.data(), neighbor_id);
                     if (top_candidates.size() < ef_search || d < top_candidates.top().first) {
                         candidates.push({ d, neighbor_id });
                         top_candidates.push({ d, neighbor_id });
@@ -389,39 +433,99 @@ public:
     }
 
 private:
-    // --- AVX2 Distance ---
+    // --- AVX2 Distance (Transformed Query Float vs Node SQ16) ---
+    // Expects q_trans[i] = (q[i] - min[i]) / scale[i]
+    // Computes Sum( (q_trans[i] - node[i])^2 * scale_sq[i] )
     __attribute__((target("avx2,fma")))
-    inline float dist_func_sq(const float* a, const float* b, int d) const {
+    inline float dist_query_sq(const float* q_trans, int id_node) const {
+        const uint16_t* node_ptr = data_sq_ptr_ + id_node * d_;
+        const float* scale_sq_ptr = scale_sq_vals_.data();
+        
         __m256 sum = _mm256_setzero_ps();
-        const float* end_safe = a + (d & ~7);
-        while (a < end_safe) {
-            __m256 v_a = _mm256_loadu_ps(a);
-            __m256 v_b = _mm256_loadu_ps(b);
-            __m256 diff = _mm256_sub_ps(v_a, v_b);
-            sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
-            a += 8; b += 8;
+        int d = d_;
+        int i = 0;
+        
+        // Process 8 elements at a time
+        for (; i <= d - 8; i += 8) {
+            // Load 8 uint16 values
+            __m128i v_u16 = _mm_loadu_si128((const __m128i*)(node_ptr + i));
+            // Convert to 8 floats
+            __m256 v_f32_node = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(v_u16));
+            
+            // Load transformed query
+            __m256 v_q = _mm256_loadu_ps(q_trans + i);
+            
+            // Diff: q_trans - node
+            __m256 diff = _mm256_sub_ps(v_q, v_f32_node);
+            
+            // Square: diff * diff
+            __m256 diff_sq = _mm256_mul_ps(diff, diff);
+            
+            // Load scale squared
+            __m256 v_scale_sq = _mm256_loadu_ps(scale_sq_ptr + i);
+            
+            // Weighted sum
+            sum = _mm256_fmadd_ps(diff_sq, v_scale_sq, sum);
         }
+        
+        // Reduction
         __m128 sum_low = _mm256_castps256_ps128(sum);
         __m128 sum_high = _mm256_extractf128_ps(sum, 1);
         __m128 v_res = _mm_add_ps(sum_low, sum_high);
         v_res = _mm_hadd_ps(v_res, v_res);
         v_res = _mm_hadd_ps(v_res, v_res);
         float res = _mm_cvtss_f32(v_res);
-        int remainder = d & 7;
-        for (int i = 0; i < remainder; ++i) {
-            float diff = a[i] - b[i];
-            res += diff * diff;
+        
+        // Handle remainder
+        for (; i < d; ++i) {
+            float val = (float)node_ptr[i];
+            float diff = q_trans[i] - val;
+            res += diff * diff * scale_sq_ptr[i];
         }
         return res;
     }
 
+    // --- AVX2 Distance (Node SQ16 vs Node SQ16) ---
+    // Used during build for heuristic neighbor selection
+    __attribute__((target("avx2,fma")))
     inline float dist_sq(int id_a, int id_b) const {
-        return dist_func_sq(data_ptr_ + id_a * d_, data_ptr_ + id_b * d_, d_);
+        const uint16_t* ptr_a = data_sq_ptr_ + id_a * d_;
+        const uint16_t* ptr_b = data_sq_ptr_ + id_b * d_;
+        const float* scale_sq_ptr = scale_sq_vals_.data();
+        
+        __m256 sum = _mm256_setzero_ps();
+        int d = d_;
+        int i = 0;
+        
+        for (; i <= d - 8; i += 8) {
+            __m128i v_u16_a = _mm_loadu_si128((const __m128i*)(ptr_a + i));
+            __m128i v_u16_b = _mm_loadu_si128((const __m128i*)(ptr_b + i));
+            
+            __m256 v_a = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(v_u16_a));
+            __m256 v_b = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(v_u16_b));
+            
+            __m256 diff = _mm256_sub_ps(v_a, v_b);
+            __m256 diff_sq = _mm256_mul_ps(diff, diff);
+            
+            __m256 v_scale_sq = _mm256_loadu_ps(scale_sq_ptr + i);
+            
+            sum = _mm256_fmadd_ps(diff_sq, v_scale_sq, sum);
+        }
+        
+        __m128 sum_low = _mm256_castps256_ps128(sum);
+        __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+        __m128 v_res = _mm_add_ps(sum_low, sum_high);
+        v_res = _mm_hadd_ps(v_res, v_res);
+        v_res = _mm_hadd_ps(v_res, v_res);
+        float res = _mm_cvtss_f32(v_res);
+        
+        for (; i < d; ++i) {
+            float d_val = (float)ptr_a[i] - (float)ptr_b[i];
+            res += d_val * d_val * scale_sq_ptr[i];
+        }
+        return res;
     }
 
-    inline float dist_query_sq(const float* query, int id_node) const {
-        return dist_func_sq(query, data_ptr_ + id_node * d_, d_);
-    }
 
     inline int get_link_offset(int level) const {
         return (level == 0) ? 0 : (M0 + (level - 1) * M);
@@ -459,7 +563,7 @@ private:
 
             for (int i = 0; i < size; ++i) {
                 int neighbor_id = links[i];
-                if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
+                if (i + 1 < size) _mm_prefetch((const char*)(data_sq_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
 
                 if (!visited.visit(neighbor_id)) {
                     float d = dist_query_sq(query_data, neighbor_id);

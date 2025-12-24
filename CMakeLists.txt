@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 add_executable(main
-  src/main.cpp
+  src/Main.cpp
   src/FinalSolution.cpp
 )
 
@@ -21,7 +21,7 @@ add_executable(create_mini_dataset
   src/CreateMiniDataset.cpp
 )
 
-# add_executable(test_bench
-#   src/TestBench.cpp
-# )
+add_executable(test_bench
+  src/TestBench.cpp
+)
 
