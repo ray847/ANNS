@@ -22,8 +22,8 @@ private:
     // --- CONSTANTS ---
     static constexpr int M = 64;
     static constexpr int M0 = 128;
-    static constexpr int ef_construction = 600;
-    static constexpr int ef_search = 300;
+    static constexpr int ef_construction = 500;
+    static constexpr int ef_search = 250;
     static constexpr int MAX_LEVEL = 16;
 
     // --- DATA ---

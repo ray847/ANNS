@@ -20,11 +20,11 @@
 class Solution {
 private:
     // --- CONSTANTS ---
-    static constexpr int M = 64;
-    static constexpr int M0 = 256;
-    static constexpr int ef_construction = 600;
+    static constexpr int M = 48;
+    static constexpr int M0 = 96;
+    static constexpr int ef_construction = 500;
     static constexpr int ef_search = 300;
-    static constexpr int MAX_LEVEL = 8;
+    static constexpr int MAX_LEVEL = 16;
 
     // --- DATA ---
     int d_ = 0;

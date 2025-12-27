@@ -10,18 +10,21 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <iostream>
+#include <iomanip>
 #include <chrono>
 #include <immintrin.h>
 #include <memory_resource> // [PMR] Required for polymorphic memory resources
 
+#include "Global.h"
 
 class Solution {
 private:
   // --- CONSTANTS ---
   static constexpr int M = 48;
   static constexpr int M0 = 96;
-  static constexpr int ef_construction = 600;
-  static constexpr int ef_search = 300;
+  static constexpr int ef_construction = 500;
+  static constexpr int ef_search = 450;
   static constexpr int MAX_LEVEL = 16;
 
   // --- DATA ---
@@ -100,6 +103,45 @@ private:
   };
 
 public:
+  // --- DESTRUCTOR ---
+  ~Solution() {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+
+    if (stats_.count == 0) return;
+
+    double avg_hops = (double)stats_.total_layer0_hops / stats_.count;
+    double avg_dist_calcs = (double)stats_.total_dist_calcs / stats_.count;
+    double avg_ratio = stats_.sum_ratios / stats_.count;
+
+    std::cout << "\n======================================================\n";
+    std::cout << "              HNSW SEARCH PERFORMANCE                 \n";
+    std::cout << "======================================================\n";
+    std::cout << "Total Queries:           " << stats_.count << "\n";
+    std::cout << "Avg Layer 0 Hops:        " << std::fixed << std::setprecision(1) << avg_hops << "\n";
+    std::cout << "Avg Dist Calcs:          " << std::fixed << std::setprecision(1) << avg_dist_calcs << "\n";
+    std::cout << "Avg Entry Point Ratio:   " << std::setprecision(3) << avg_ratio << " (1.0 is perfect)\n";
+    std::cout << "------------------------------------------------------\n";
+    std::cout << "Avg Time per Layer (ns):\n";
+
+    long long total_avg_time = 0;
+    for (int l = MAX_LEVEL; l >= 0; l--) {
+      if (l > max_level_ && stats_.layer_times_ns[l] == 0) continue;
+
+      double avg_ns = (double)stats_.layer_times_ns[l] / stats_.count;
+      total_avg_time += (long long)avg_ns;
+
+      std::cout << "  Layer " << std::setw(2) << l << ": "
+        << std::setw(8) << (long long)avg_ns << " ns";
+
+      if (l == 0) std::cout << " (Dense Search)";
+      else if (l == max_level_) std::cout << " (Entry)";
+      std::cout << "\n";
+    }
+    std::cout << "------------------------------------------------------\n";
+    std::cout << "Total Avg Latency:       " << total_avg_time / 1000.0 << " us\n";
+    std::cout << "======================================================\n";
+  }
+
   // --- BUILD FUNCTION ---
   void build(int d, const std::vector<float>& base) {
     d_ = d;
@@ -134,6 +176,10 @@ public:
     max_level_ = nodes_[0].level;
 
     std::atomic<size_t> atomic_idx{ 1 };
+
+    if constexpr (global::kDEBUG) {
+      std::cout << "Building HNSW (d=" << d_ << ", M=" << M << ") for " << n_ << " vectors..." << std::endl;
+    }
 
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4;
@@ -215,6 +261,7 @@ public:
     for (auto& t : threads) {
       t.join();
     }
+    if constexpr (global::kDEBUG) std::cout << "Build: 100% - Done.\n";
   }
 
   // --- SEARCH FUNCTION (Instrumented) ---

@@ -30,7 +30,7 @@ std::vector<float> LoadBaseFromFile(const global::DataSetInfo& info) {
   std::cout << "  [IO] Loading Base: " << info.dataset_file << "..." << std::flush;
   std::ifstream is(std::string{info.dataset_file});
   if (!is) throw std::runtime_error("Could not open dataset file: " + std::string{info.dataset_file});
-
+  
   std::vector<float> base(info.dims * info.n_data_points);
   for (auto& ele : base) is >> ele;
   std::cout << " Done." << std::endl;
@@ -60,9 +60,7 @@ std::vector<std::vector<size_t>> LoadLabelsFromFile(const global::DataSetInfo& i
     std::string line;
     std::getline(is, line);
     std::stringstream ss{line};
-    for (auto& ele : label) {
-      ss >> ele;
-    }
+    for (auto& ele : label) ss >> ele;
   }
   std::cout << " Done." << std::endl;
   return labels;
@@ -70,19 +68,19 @@ std::vector<std::vector<size_t>> LoadLabelsFromFile(const global::DataSetInfo& i
 
 // Unified Loader
 LoadedDataset LoadDataset(const global::DataSetInfo& info) {
-  std::cout << "\n>>> Loading Dataset into RAM: " << info.name << " <<<" << std::endl;
-  LoadedDataset ds;
-  ds.name = info.name;
-  ds.dims = info.dims;
-  ds.n_queries = info.n_queries;
-
-  // Load all components
-  ds.base = LoadBaseFromFile(info);
-  ds.samples = LoadSamplesFromFile(info);
-  ds.labels = LoadLabelsFromFile(info);
-
-  std::cout << ">>> Load Complete. Memory Ready. <<<\n" << std::endl;
-  return ds;
+    std::cout << "\n>>> Loading Dataset into RAM: " << info.name << " <<<" << std::endl;
+    LoadedDataset ds;
+    ds.name = info.name;
+    ds.dims = info.dims;
+    ds.n_queries = info.n_queries;
+    
+    // Load all components
+    ds.base = LoadBaseFromFile(info);
+    ds.samples = LoadSamplesFromFile(info);
+    ds.labels = LoadLabelsFromFile(info);
+    
+    std::cout << ">>> Load Complete. Memory Ready. <<<\n" << std::endl;
+    return ds;
 }
 
 // --- Test Runner ---
@@ -103,9 +101,9 @@ void RunTest(const LoadedDataset& data, std::string_view config_name) {
   using std::chrono::high_resolution_clock;
 
   using IndexType = std::conditional_t<
-  Config::kIndexStrategyVal == TunableHNSW::IndexStrategy::kIVF_HNSW,
-  TunableHNSW::IVF<Config>,
-  TunableHNSW::HNSW<Config>
+    Config::kIndexStrategyVal == TunableHNSW::IndexStrategy::kIVF_HNSW,
+    TunableHNSW::IVF<Config>,
+    TunableHNSW::HNSW<Config>
   >;
 
   auto index = std::make_unique<IndexType>();
@@ -113,10 +111,10 @@ void RunTest(const LoadedDataset& data, std::string_view config_name) {
 
   std::cout << "Building Index... " << std::flush;
   auto st = high_resolution_clock::now();
-
+  
   // Pass the pre-loaded base vector
   index->Build(data.base); 
-
+  
   auto build_ed = high_resolution_clock::now();
   std::cout << "Done." << std::endl;
 
@@ -152,11 +150,7 @@ int main() {
   using TunableHNSW::QuantizationStrategy;
   using TunableHNSW::IndexStrategy;
 
-  // --- TUNED CONFIGURATIONS ---
-
-  // *** SIFT CONFIGURATIONS ***
-  // Baseline: Standard HNSW (High Accuracy)
-// --- THE "PERFECT 6" RUNS ---
+  // --- THE "PERFECT 6" RUNS ---
 
   // *** RUN 1 & 2: SIFT SHOWDOWN (Target: >99%) ***
   // Goal: Prove that Dynamic Search maintains 99% recall faster than Standard.
@@ -200,7 +194,8 @@ int main() {
                                  48, 96, 800, 1600, 16, 
                                  100, 20, 25000>; // PQ specific params
 
-  try {
+
+try {
     // --- SIFT BATTLE ---
     {
         LoadedDataset siftData = LoadDataset(global::kSIFT_INFO);

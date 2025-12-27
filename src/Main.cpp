@@ -7,8 +7,8 @@
 #include <unordered_set> // std::unordered_set
 
 #include "Global.h" // global::kDATA_SET_INFOS
-#include "HNSWMTSolution.h"
-//#include "HNSWSQMTSolution.h"
+//#include "MySolution.h"
+#include "HNSWPMRMTSolution.h"
 
 /* Function Declarations */
 void run(const global::DataSetInfo& dataset);

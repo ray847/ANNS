@@ -344,3 +344,167 @@ Total Navigation Time per Layer (ns):
   Layer  1:     50031685 ns
   Layer  0:  10572353246 ns
 ======================================================
+
+>>> Loading Dataset into RAM: Sift <<<
+  [IO] Loading Base: data_o/sift/base.txt... Done.
+  [IO] Loading Queries: data_o/sift/sample.txt... Done.
+  [IO] Loading Labels: data_o/sift/label.txt... Done.
+>>> Load Complete. Memory Ready. <<<
+
+=== SIFT RUNS (Target 99%) ===
+------------------------------------------------------------
+TEST: [1] SIFT | Standard | 99% Reference
+------------------------------------------------------------
+Building Index... Building HNSW graph for 1000000 vectors...
+Building HNSW: 100%
+HNSW graph build complete.
+Done.
+Searching...      Done.
+Build Time:       515.4282 s
+Avg Search Time:  1.4698 ms
+Recall@10:        0.9983
+
+
+======================================================
+              TunableHNSW METRICS REPORT
+======================================================
+Total Distance Calculations: 10085482635
+------------------------------------------------------
+Total Navigation Time per Layer (ns):
+  Layer  3:     38909360 ns
+  Layer  2:     77330324 ns
+  Layer  1:     93876440 ns
+  Layer  0:  14264554456 ns
+======================================================
+------------------------------------------------------------
+TEST: [2] SIFT | Dynamic  | 99% Challenger
+------------------------------------------------------------
+Building Index... Building HNSW graph for 1000000 vectors...
+Building HNSW: 100%
+HNSW graph build complete.
+Done.
+Searching...      Done.
+Build Time:       528.2937 s
+Avg Search Time:  0.9368 ms
+Recall@10:        0.9947
+
+
+======================================================
+              TunableHNSW METRICS REPORT
+======================================================
+Total Distance Calculations: 10052763143
+------------------------------------------------------
+Total Navigation Time per Layer (ns):
+  Layer  3:     37276342 ns
+  Layer  2:     85237940 ns
+  Layer  1:    107200459 ns
+  Layer  0:   8757928029 ns
+======================================================
+
+>>> Loading Dataset into RAM: Glove <<<
+  [IO] Loading Base: data_o/glove/base.txt... Done.
+  [IO] Loading Queries: data_o/glove/sample.txt... Done.
+  [IO] Loading Labels: data_o/glove/label.txt... Done.
+>>> Load Complete. Memory Ready. <<<
+
+
+=== GLOVE RUNS (Cost & Strategy) ===
+------------------------------------------------------------
+TEST: [3] GloVe | Standard | 95% Baseline
+------------------------------------------------------------
+Building Index... Building HNSW graph for 1183514 vectors...
+Building HNSW: 100%
+HNSW graph build complete.
+Done.
+Searching...      Done.
+Build Time:       594.9645 s
+Avg Search Time:  1.1456 ms
+Recall@10:        0.9301
+
+
+======================================================
+              TunableHNSW METRICS REPORT
+======================================================
+Total Distance Calculations: 13297101065
+------------------------------------------------------
+Total Navigation Time per Layer (ns):
+  Layer  4:     23728786 ns
+  Layer  3:     39238400 ns
+  Layer  2:     39361925 ns
+  Layer  1:     38073002 ns
+  Layer  0:  11085135146 ns
+======================================================
+------------------------------------------------------------
+TEST: [4] GloVe | Standard | 99% High Accuracy (M=48)
+------------------------------------------------------------
+Building Index... Building HNSW graph for 1183514 vectors...
+Building HNSW: 100%
+HNSW graph build complete.
+Done.
+Searching...      Done.
+Build Time:       3896.5426 s
+Avg Search Time:  10.3240 ms
+Recall@10:        0.9995
+
+
+======================================================
+              TunableHNSW METRICS REPORT
+======================================================
+Total Distance Calculations: 85466461118
+------------------------------------------------------
+Total Navigation Time per Layer (ns):
+  Layer  3:     32121284 ns
+  Layer  2:     70947926 ns
+  Layer  1:    111677326 ns
+  Layer  0: 101768659043 ns
+======================================================
+------------------------------------------------------------
+TEST: [5] GloVe | Dynamic  | 99% Optimization
+------------------------------------------------------------
+Building Index... Building HNSW graph for 1183514 vectors...
+Building HNSW: 100%
+HNSW graph build complete.
+Done.
+Searching...      Done.
+Build Time:       3870.3812 s
+Avg Search Time:  3.0730 ms
+Recall@10:        0.9876
+
+
+======================================================
+              TunableHNSW METRICS REPORT
+======================================================
+Total Distance Calculations: 84909195090
+------------------------------------------------------
+Total Navigation Time per Layer (ns):
+  Layer  3:     33604951 ns
+  Layer  2:     85676021 ns
+  Layer  1:    137971605 ns
+  Layer  0:  29054212893 ns
+======================================================
+------------------------------------------------------------
+TEST: [6] GloVe | PQ+Rerank| 99% Memory Opt
+------------------------------------------------------------
+Building Index... Building HNSW graph for 1183514 vectors...
+Building HNSW: 100%
+HNSW graph build complete.
+Training Product Quantizer and encoding vectors...
+Product Quantizer training and encoding complete.
+Done.
+Searching...      Done.
+Build Time:       3819.1438 s
+Avg Search Time:  12.4833 ms
+Recall@10:        0.9974
+
+
+======================================================
+              TunableHNSW METRICS REPORT
+======================================================
+Total Distance Calculations: 85563739548
+------------------------------------------------------
+Total Navigation Time per Layer (ns):
+  Layer  3:     31449091 ns
+  Layer  2:     72352836 ns
+  Layer  1:    105398509 ns
+  Layer  0: 120359126221 ns
+======================================================

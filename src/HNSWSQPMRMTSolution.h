@@ -10,52 +10,61 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <iostream>
+#include <iomanip>
 #include <chrono>
 #include <immintrin.h>
-#include <memory_resource> // [PMR] Required for polymorphic memory resources
+#include <memory_resource> // [PMR] Required
 
+#include "Global.h"
 
 class Solution {
 private:
   // --- CONSTANTS ---
   static constexpr int M = 48;
   static constexpr int M0 = 96;
-  static constexpr int ef_construction = 600;
+  static constexpr int ef_construction = 500;
   static constexpr int ef_search = 300;
   static constexpr int MAX_LEVEL = 16;
 
   // --- DATA ---
   int d_ = 0;
   size_t n_ = 0;
-  const float* data_ptr_ = nullptr;
-  std::vector<float> data_storage_;
 
   // [PMR] 1. Define the monotonic resource. 
-  // It must be declared BEFORE nodes_ so it is destroyed AFTER nodes_.
+  // Declared before nodes_ to ensure correct destruction order.
   std::pmr::monotonic_buffer_resource memory_pool_;
+
+  // Scalar Quantization Data
+  std::vector<uint16_t> data_sq_;
+  const uint16_t* data_sq_ptr_ = nullptr;
+
+  // Quantization Parameters (per dimension)
+  std::vector<float> min_vals_;
+  std::vector<float> scale_vals_;    
+  std::vector<float> scale_sq_vals_; 
 
   struct Node {
     int level;
-    // [PMR] 2. Use pmr::vector for graph links to utilize the memory pool
+    // [PMR] 2. Use pmr::vector for graph structure
     std::pmr::vector<int> flat_links;
     std::pmr::vector<int> link_counts;
     std::unique_ptr<std::mutex> lock;
 
-    // [PMR] 3. Constructor injects the allocator
+    // [PMR] 3. Constructor accepts memory resource
     Node(int lvl, int total_links, std::pmr::memory_resource* mr)
-        : level(lvl),
-          flat_links(total_links, mr),
-          link_counts(lvl + 1, 0, mr),
-          lock(std::make_unique<std::mutex>()) 
+      : level(lvl),
+      flat_links(total_links, mr),
+      link_counts(lvl + 1, 0, mr),
+      lock(std::make_unique<std::mutex>()) 
     {}
-    
-    // Move-only due to unique_ptr and efficient vector movement
-    Node(Node&&) = default; 
+
+    // Move-only
+    Node(Node&&) = default;
     Node& operator=(Node&&) = default;
     Node(const Node&) = delete;
     Node& operator=(const Node&) = delete;
   };
-
   std::vector<Node> nodes_;
 
   int entry_point_ = -1;
@@ -67,7 +76,6 @@ private:
   struct SearchStats {
     long long count = 0;
     long long total_layer0_hops = 0;
-    long long total_dist_calcs = 0;
     double sum_ratios = 0.0;
     std::vector<long long> layer_times_ns;
 
@@ -100,33 +108,98 @@ private:
   };
 
 public:
+  // --- DESTRUCTOR ---
+  ~Solution() {
+    std::lock_guard<std::mutex> lock(stats_mutex_);
+
+    if (stats_.count == 0) return;
+
+    double avg_hops = (double)stats_.total_layer0_hops / stats_.count;
+    double avg_ratio = stats_.sum_ratios / stats_.count;
+
+    std::cout << "\n======================================================\n";
+    std::cout << "              HNSW SQ16 SEARCH PERFORMANCE            \n";
+    std::cout << "======================================================\n";
+    std::cout << "Total Queries:           " << stats_.count << "\n";
+    std::cout << "Avg Layer 0 Hops:        " << std::fixed << std::setprecision(1) << avg_hops << "\n";
+    std::cout << "Avg Entry Point Ratio:   " << std::setprecision(3) << avg_ratio << " (1.0 is perfect)\n";
+    std::cout << "------------------------------------------------------\n";
+    std::cout << "Avg Time per Layer (ns):\n";
+
+    long long total_avg_time = 0;
+    for (int l = MAX_LEVEL; l >= 0; l--) {
+      if (l > max_level_ && stats_.layer_times_ns[l] == 0) continue;
+
+      double avg_ns = (double)stats_.layer_times_ns[l] / stats_.count;
+      total_avg_time += (long long)avg_ns;
+
+      std::cout << "  Layer " << std::setw(2) << l << ": "
+        << std::setw(8) << (long long)avg_ns << " ns";
+
+      if (l == 0) std::cout << " (Dense Search)";
+      else if (l == max_level_) std::cout << " (Entry)";
+      std::cout << "\n";
+    }
+    std::cout << "------------------------------------------------------\n";
+    std::cout << "Total Avg Latency:       " << total_avg_time / 1000.0 << " us\n";
+    std::cout << "======================================================\n";
+  }
+
   // --- BUILD FUNCTION ---
   void build(int d, const std::vector<float>& base) {
     d_ = d;
-    data_storage_ = base;
-    data_ptr_ = data_storage_.data();
     n_ = base.size() / d_;
-    
-    // [PMR] Clear previous data if any
-    nodes_.clear();
-    // Optional: Pre-allocate a large chunk for the monotonic buffer if memory size is known roughly
-    // memory_pool_.release(); // Only if you want to reuse the solution object strictly
 
-    nodes_.reserve(n_); // Reserve vector to prevent reallocations of the Node wrappers
+    // 1. Compute Statistics (Min, Max) for Quantization
+    min_vals_.assign(d, std::numeric_limits<float>::max());
+    std::vector<float> max_vals(d, std::numeric_limits<float>::lowest());
+
+    for (size_t i = 0; i < n_; ++i) {
+      const float* vec = base.data() + i * d;
+      for (int j = 0; j < d; ++j) {
+        if (vec[j] < min_vals_[j]) min_vals_[j] = vec[j];
+        if (vec[j] > max_vals[j]) max_vals[j] = vec[j];
+      }
+    }
+
+    scale_vals_.resize(d);
+    scale_sq_vals_.resize(d);
+    for (int j = 0; j < d; ++j) {
+      float range = max_vals[j] - min_vals_[j];
+      if (range < 1e-9f) range = 1e-9f;
+      scale_vals_[j] = range / 65535.0f;
+      scale_sq_vals_[j] = scale_vals_[j] * scale_vals_[j];
+    }
+
+    // 2. Quantize Data
+    data_sq_.resize(n_ * d);
+    data_sq_ptr_ = data_sq_.data();
+
+    for (size_t i = 0; i < n_; ++i) {
+      const float* src = base.data() + i * d;
+      uint16_t* dst = data_sq_.data() + i * d;
+      for (int j = 0; j < d; ++j) {
+        float val = (src[j] - min_vals_[j]) / scale_vals_[j];
+        dst[j] = static_cast<uint16_t>(std::round(val));
+      }
+    }
+
+    // 3. Initialize Graph with PMR
+    nodes_.clear();
+    nodes_.reserve(n_); // Reserve main vector to avoid resizing/copying Nodes
     level_mult_ = 1.0 / std::log(1.0 * M);
 
     std::mt19937 rng_init(42);
-    
-    // [PMR] Serial Initialization of Memory Layout
-    // We allocate all nodes and their internal PMR vectors here.
-    // Because memory_pool_ is monotonic, these allocations will be tightly packed.
+
+    // [PMR] Serial Allocation Loop
+    // Allocating sequentially here ensures the monotonic buffer is packed tightly 
+    // in order of node ID, optimizing spatial locality.
     for (size_t i = 0; i < n_; ++i) {
       int level = get_random_level(rng_init);
-      
       size_t total_links = M0;
       if (level > 0) total_links += (size_t)level * M;
-      
-      // Emplace constructs the Node in-place, passing the memory pool pointer
+
+      // Emplace back passes arguments to Node constructor
       nodes_.emplace_back(level, total_links, &memory_pool_);
     }
 
@@ -134,6 +207,10 @@ public:
     max_level_ = nodes_[0].level;
 
     std::atomic<size_t> atomic_idx{ 1 };
+
+    if constexpr (global::kDEBUG) {
+      std::cout << "Building HNSW (d=" << d_ << ", M=" << M << ") for " << n_ << " vectors (SQ16)..." << std::endl;
+    }
 
     unsigned int num_threads = std::thread::hardware_concurrency();
     if (num_threads == 0) num_threads = 4;
@@ -143,6 +220,9 @@ public:
       visited.resize(n_);
       std::mt19937 rng(42 + thread_id);
 
+      // Thread-local temporary buffer for transformed vectors
+      std::vector<float> curr_vec_trans(d_);
+
       while (true) {
         size_t curr_obj = atomic_idx.fetch_add(1, std::memory_order_relaxed);
         if (curr_obj >= n_) break;
@@ -150,24 +230,30 @@ public:
         int curr_level = nodes_[curr_obj].level;
         int curr_ep = entry_point_;
         int curr_max_level = max_level_;
-        const float* curr_vec = data_ptr_ + curr_obj * d_;
 
-        // 1. Descent (Greedy)
+        // Reconstruct float-like query from SQ data for the current object
+        const uint16_t* curr_sq = data_sq_ptr_ + curr_obj * d_;
+        for(int j=0; j<d_; ++j) {
+          curr_vec_trans[j] = (float)curr_sq[j];
+        }
+
+        // 1. Descent
         for (int l = curr_max_level; l > curr_level; l--) {
           bool changed = true;
           while (changed) {
             changed = false;
-            float dist_ep = dist_query_sq(curr_vec, curr_ep);
+            float dist_ep = dist_query_sq(curr_vec_trans.data(), curr_ep);
             const Node& node_ep = nodes_[curr_ep];
             if (l >= node_ep.link_counts.size()) break;
 
             int offset = get_link_offset(l);
             int count = node_ep.link_counts[l];
+            // [PMR] Accessing pmr::vector data
             const int* links = node_ep.flat_links.data() + offset;
 
             for (int j = 0; j < count; ++j) {
               int neighbor = links[j];
-              float d = dist_query_sq(curr_vec, neighbor);
+              float d = dist_query_sq(curr_vec_trans.data(), neighbor);
               if (d < dist_ep) {
                 curr_ep = neighbor;
                 dist_ep = d;
@@ -179,7 +265,7 @@ public:
 
         // 2. Construction
         for (int l = std::min(curr_level, curr_max_level); l >= 0; l--) {
-          auto top_candidates = search_layer_build(curr_vec, curr_ep, ef_construction, l, visited);
+          auto top_candidates = search_layer_build(curr_vec_trans.data(), curr_ep, ef_construction, l, visited);
           std::vector<std::pair<float, int>> potential;
           potential.reserve(ef_construction + 1);
           while (!top_candidates.empty()) {
@@ -188,6 +274,7 @@ public:
           }
 
           int offset = get_link_offset(l);
+          // [PMR] Accessing pmr::vector data
           int* link_dst = nodes_[curr_obj].flat_links.data() + offset;
           int count = 0;
           get_neighbors_heuristic(curr_obj, potential, l, link_dst, count);
@@ -212,9 +299,24 @@ public:
     for (unsigned int i = 0; i < num_threads; ++i) {
       threads.emplace_back(worker_func, i);
     }
+
+    std::thread progress_thread([&]() {
+      while (true) {
+        size_t curr = atomic_idx.load(std::memory_order_relaxed);
+        if (curr > n_) curr = n_;
+        float progress = (n_ > 0) ? ((float)curr / n_ * 100.0f) : 100.0f;
+        std::cout << "\rBuild Progress: " << std::fixed << std::setprecision(1) << progress << "%" << std::flush;
+        if (curr >= n_) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+      }
+      std::cout << "\rBuild Progress: 100.0%       " << std::endl;
+    });
+
     for (auto& t : threads) {
       t.join();
     }
+    progress_thread.join();
+    if constexpr (global::kDEBUG) std::cout << "Build: 100% - Done.\n";
   }
 
   // --- SEARCH FUNCTION (Instrumented) ---
@@ -224,13 +326,17 @@ public:
 
     std::vector<long long> local_layer_times(MAX_LEVEL + 1, 0);
     int local_hops = 0;
-    long long local_dist_calcs = 0;
 
     int curr_ep = entry_point_;
     const float* q_data = query.data();
-    
-    float cur_dist = dist_query_sq(q_data, curr_ep);
-    local_dist_calcs++;
+
+    // Transform query: q_trans = (q - min) / scale
+    std::vector<float> q_trans(d_);
+    for(int i = 0; i < d_; ++i) {
+      q_trans[i] = (q_data[i] - min_vals_[i]) / scale_vals_[i];
+    }
+
+    float cur_dist = dist_query_sq(q_trans.data(), curr_ep);
 
     visited.advance();
     visited.visit(curr_ep);
@@ -247,15 +353,14 @@ public:
 
         int count = node.link_counts[l];
         int offset = get_link_offset(l);
+        // [PMR]
         const int* links = node.flat_links.data() + offset;
 
         for (int i = 0; i < count; ++i) {
           int neighbor = links[i];
-          if (i + 1 < count) _mm_prefetch((const char*)(data_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
+          if (i + 1 < count) _mm_prefetch((const char*)(data_sq_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
 
-          float d = dist_query_sq(q_data, neighbor);
-          local_dist_calcs++;
-
+          float d = dist_query_sq(q_trans.data(), neighbor);
           if (d < cur_dist) {
             cur_dist = d;
             curr_ep = neighbor;
@@ -293,13 +398,11 @@ public:
 
       for (int i = 0; i < size; ++i) {
         int neighbor_id = links[i];
-        if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
+        if (i + 1 < size) _mm_prefetch((const char*)(data_sq_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
 
         if (!visited.visit(neighbor_id)) {
           local_hops++;
-          float d = dist_query_sq(q_data, neighbor_id);
-          local_dist_calcs++;
-
+          float d = dist_query_sq(q_trans.data(), neighbor_id);
           if (top_candidates.size() < ef_search || d < top_candidates.top().first) {
             candidates.push({ d, neighbor_id });
             top_candidates.push({ d, neighbor_id });
@@ -334,7 +437,6 @@ public:
       std::lock_guard<std::mutex> lock(stats_mutex_);
       stats_.count++;
       stats_.total_layer0_hops += local_hops;
-      stats_.total_dist_calcs += local_dist_calcs;
       stats_.sum_ratios += ratio;
       for (int i = 0; i <= MAX_LEVEL; ++i) {
         stats_.layer_times_ns[i] += local_layer_times[i];
@@ -343,39 +445,81 @@ public:
   }
 
 private:
-  // --- AVX2 Distance ---
+  // --- AVX2 Distance (Transformed Query Float vs Node SQ16) ---
   __attribute__((target("avx2,fma")))
-  inline float dist_func_sq(const float* a, const float* b, int d) const {
+  inline float dist_query_sq(const float* q_trans, int id_node) const {
+    const uint16_t* node_ptr = data_sq_ptr_ + id_node * d_;
+    const float* scale_sq_ptr = scale_sq_vals_.data();
+
     __m256 sum = _mm256_setzero_ps();
-    const float* end_safe = a + (d & ~7);
-    while (a < end_safe) {
-      __m256 v_a = _mm256_loadu_ps(a);
-      __m256 v_b = _mm256_loadu_ps(b);
-      __m256 diff = _mm256_sub_ps(v_a, v_b);
-      sum = _mm256_add_ps(sum, _mm256_mul_ps(diff, diff));
-      a += 8; b += 8;
+    int d = d_;
+    int i = 0;
+
+    for (; i <= d - 8; i += 8) {
+      __m128i v_u16 = _mm_loadu_si128((const __m128i*)(node_ptr + i));
+      __m256 v_f32_node = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(v_u16));
+      __m256 v_q = _mm256_loadu_ps(q_trans + i);
+      __m256 diff = _mm256_sub_ps(v_q, v_f32_node);
+      __m256 diff_sq = _mm256_mul_ps(diff, diff);
+      __m256 v_scale_sq = _mm256_loadu_ps(scale_sq_ptr + i);
+      sum = _mm256_fmadd_ps(diff_sq, v_scale_sq, sum);
     }
+
     __m128 sum_low = _mm256_castps256_ps128(sum);
     __m128 sum_high = _mm256_extractf128_ps(sum, 1);
     __m128 v_res = _mm_add_ps(sum_low, sum_high);
     v_res = _mm_hadd_ps(v_res, v_res);
     v_res = _mm_hadd_ps(v_res, v_res);
     float res = _mm_cvtss_f32(v_res);
-    int remainder = d & 7;
-    for (int i = 0; i < remainder; ++i) {
-      float diff = a[i] - b[i];
-      res += diff * diff;
+
+    for (; i < d; ++i) {
+      float val = (float)node_ptr[i];
+      float diff = q_trans[i] - val;
+      res += diff * diff * scale_sq_ptr[i];
     }
     return res;
   }
 
+  // --- AVX2 Distance (Node SQ16 vs Node SQ16) ---
+  __attribute__((target("avx2,fma")))
   inline float dist_sq(int id_a, int id_b) const {
-    return dist_func_sq(data_ptr_ + id_a * d_, data_ptr_ + id_b * d_, d_);
+    const uint16_t* ptr_a = data_sq_ptr_ + id_a * d_;
+    const uint16_t* ptr_b = data_sq_ptr_ + id_b * d_;
+    const float* scale_sq_ptr = scale_sq_vals_.data();
+
+    __m256 sum = _mm256_setzero_ps();
+    int d = d_;
+    int i = 0;
+
+    for (; i <= d - 8; i += 8) {
+      __m128i v_u16_a = _mm_loadu_si128((const __m128i*)(ptr_a + i));
+      __m128i v_u16_b = _mm_loadu_si128((const __m128i*)(ptr_b + i));
+
+      __m256 v_a = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(v_u16_a));
+      __m256 v_b = _mm256_cvtepi32_ps(_mm256_cvtepu16_epi32(v_u16_b));
+
+      __m256 diff = _mm256_sub_ps(v_a, v_b);
+      __m256 diff_sq = _mm256_mul_ps(diff, diff);
+
+      __m256 v_scale_sq = _mm256_loadu_ps(scale_sq_ptr + i);
+
+      sum = _mm256_fmadd_ps(diff_sq, v_scale_sq, sum);
+    }
+
+    __m128 sum_low = _mm256_castps256_ps128(sum);
+    __m128 sum_high = _mm256_extractf128_ps(sum, 1);
+    __m128 v_res = _mm_add_ps(sum_low, sum_high);
+    v_res = _mm_hadd_ps(v_res, v_res);
+    v_res = _mm_hadd_ps(v_res, v_res);
+    float res = _mm_cvtss_f32(v_res);
+
+    for (; i < d; ++i) {
+      float d_val = (float)ptr_a[i] - (float)ptr_b[i];
+      res += d_val * d_val * scale_sq_ptr[i];
+    }
+    return res;
   }
 
-  inline float dist_query_sq(const float* query, int id_node) const {
-    return dist_func_sq(query, data_ptr_ + id_node * d_, d_);
-  }
 
   inline int get_link_offset(int level) const {
     return (level == 0) ? 0 : (M0 + (level - 1) * M);
@@ -408,11 +552,12 @@ private:
       const Node& node = nodes_[curr_id];
       int size = node.link_counts[level];
       int offset = get_link_offset(level);
+      // [PMR] Accessing pmr::vector
       const int* links = node.flat_links.data() + offset;
 
       for (int i = 0; i < size; ++i) {
         int neighbor_id = links[i];
-        if (i + 1 < size) _mm_prefetch((const char*)(data_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
+        if (i + 1 < size) _mm_prefetch((const char*)(data_sq_ptr_ + links[i + 1] * d_), _MM_HINT_T0);
 
         if (!visited.visit(neighbor_id)) {
           float d = dist_query_sq(query_data, neighbor_id);
@@ -459,7 +604,7 @@ private:
 
     int count = node.link_counts[level];
     int offset = get_link_offset(level);
-    // [PMR] flat_links is pmr::vector, but data() returns a standard int* pointer
+    // [PMR] Accessing pmr::vector
     int* links_ptr = node.flat_links.data() + offset;
 
     for (int i = 0; i < count; ++i) if (links_ptr[i] == dest) return;
@@ -479,8 +624,8 @@ private:
       __atomic_store_n(&node.link_counts[level], count + 1, __ATOMIC_RELEASE);
     }
     else {
-      // Temporary vectors here use standard allocators (stack/heap default) 
-      // because they are short-lived. PMR Monotonic is for persistent storage.
+      // Temporary vectors for heuristic logic do NOT use the monotonic resource
+      // because they are short-lived. We let them use the default allocator.
       std::vector<std::pair<float, int>> candidates;
       candidates.reserve(max_m + 1);
       for (int i = 0; i < count; ++i) candidates.push_back({ dist_sq(src, links_ptr[i]), links_ptr[i] });
