@@ -8,7 +8,8 @@
 
 #include "Global.h" // global::kDATA_SET_INFOS
 //#include "MySolution.h"
-#include "HNSWPMRMTSolution.h"
+#include "HNSWMTSolution.h"
+//#include "NaiveSolution.h"
 
 /* Function Declarations */
 void run(const global::DataSetInfo& dataset);
@@ -16,9 +17,9 @@ void run(const global::DataSetInfo& dataset);
 /* Main Function */
 int main() {
   run(global::kMINISIFT_INFO);
-  run(global::kMINIGLOVE_INFO);
-  run(global::kSIFT_INFO);
-  run(global::kGLOVE_INFO);
+  //run(global::kMINIGLOVE_INFO);
+  //run(global::kSIFT_INFO);
+  //run(global::kGLOVE_INFO);
   return 0;
 }
 

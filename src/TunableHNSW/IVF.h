@@ -20,6 +20,7 @@
 #include <numeric>
 #include <algorithm>
 #include <thread>
+#include <memory_resource>
 #include "../Global.h"
 #include "Config.h"
 #include "HNSW.h"
@@ -41,7 +42,9 @@ class IVF {
       10,   // MaxLevel
       0,    // PQSubquantizers
       0,    // IVF_NumClusters
-      0     // IVF_NProbe
+      0,    // IVF_NProbe
+      0,    // IVF_TrainSampleSize
+      MainConfig::kUsePMRVal
       >;
 
   using CentroidHNSW = HNSW<CentroidHNSWConfig>;
@@ -49,7 +52,14 @@ class IVF {
   IVF() = default;
 
   void Build(const std::vector<float>& base_data) {
-    data_storage_ = base_data;
+    if constexpr (MainConfig::kUsePMRVal) {
+      pmr_resource_.emplace();
+      data_storage_ = Vector<float>(&*pmr_resource_);
+      coarse_centroids_ = Vector<float>(&*pmr_resource_);
+      inverted_lists_ = Vector<Vector<int>>(&*pmr_resource_);
+      pq_codes_ = Vector<uint8_t>(&*pmr_resource_);
+    }
+    data_storage_.assign(base_data.begin(), base_data.end());
     const float* data_ptr = data_storage_.data();
     size_t num_points = base_data.size() / MainConfig::kDimVal;
 
@@ -74,8 +84,9 @@ class IVF {
     }
 
     KMeans kmeans(MainConfig::kIVFNumClustersVal, 25);
-    coarse_centroids_ =
+    auto trained_centroids =
         kmeans.Train(kmeans_train_data, kmeans_train_points, MainConfig::kDimVal, MainConfig::kDimVal);
+    coarse_centroids_.assign(trained_centroids.begin(), trained_centroids.end());
 
     centroid_hnsw_ = std::make_unique<CentroidHNSW>();
     centroid_hnsw_->Build(coarse_centroids_);
@@ -226,18 +237,22 @@ class IVF {
   }
 
  private:
+  template <typename T>
+  using Vector = std::conditional_t<MainConfig::kUsePMRVal, std::pmr::vector<T>, std::vector<T>>;
+
   using PQ = std::conditional_t<
       MainConfig::kQuantizationVal == QuantizationStrategy::kPQ || MainConfig::kQuantizationVal == QuantizationStrategy::kOPQ,
       OptimizedProductQuantizer<MainConfig>,
       std::nullptr_t>;
 
-  std::vector<float> coarse_centroids_;
-  std::vector<std::vector<int>> inverted_lists_;
+  std::optional<std::pmr::monotonic_buffer_resource> pmr_resource_;
+  Vector<float> coarse_centroids_;
+  Vector<Vector<int>> inverted_lists_;
   std::unique_ptr<CentroidHNSW> centroid_hnsw_;
 
-  std::vector<float> data_storage_;
+  Vector<float> data_storage_;
   std::optional<PQ> pq_;
-  std::vector<uint8_t> pq_codes_;
+  Vector<uint8_t> pq_codes_;
 };
 
 }  // namespace TunableHNSW

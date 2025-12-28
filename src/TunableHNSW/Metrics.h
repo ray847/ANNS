@@ -11,6 +11,7 @@ template<int MaxLevel_>
 struct HNSWMetrics {
     static constexpr int MaxLevel = MaxLevel_;
     std::atomic<long long> distance_calculations{0};
+    std::atomic<long long> search_count{0};
     std::vector<std::atomic<long long>> navigation_time_per_layer;
 
     HNSWMetrics() : navigation_time_per_layer(MaxLevel + 1) {
@@ -20,6 +21,7 @@ struct HNSWMetrics {
     void reset() {
         if constexpr (global::kDEBUG) {
             distance_calculations = 0;
+            search_count = 0;
             for (int i = 0; i <= MaxLevel; ++i) {
                 navigation_time_per_layer[i] = 0;
             }
@@ -29,6 +31,12 @@ struct HNSWMetrics {
     inline void increment_distance_calculations(long long count = 1) {
         if constexpr (global::kDEBUG) {
             distance_calculations.fetch_add(count, std::memory_order_relaxed);
+        }
+    }
+
+    inline void increment_search_count() {
+        if constexpr (global::kDEBUG) {
+            search_count.fetch_add(1, std::memory_order_relaxed);
         }
     }
 

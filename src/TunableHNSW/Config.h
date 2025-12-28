@@ -5,7 +5,7 @@
 namespace TunableHNSW {
 
 enum class SearchStrategy { kStandard, kDynamic };
-enum class QuantizationStrategy { kNone, kPQ, kOPQ };
+enum class QuantizationStrategy { kNone, kPQ, kOPQ, kSQ };
 enum class IndexStrategy { kHNSW, kIVF_HNSW };
 
 template <int kDim, bool kUseSIMD, SearchStrategy kSearchStrategy,
@@ -13,7 +13,7 @@ template <int kDim, bool kUseSIMD, SearchStrategy kSearchStrategy,
           size_t kM, size_t kM0, size_t kEfConstruction, size_t kEfSearch,
           int kMaxLevel, int kDynamicMaxNoImprovementIterations = 100, int kPQSubquantizers = 0,
           size_t kQuantizerTrainSampleSize = 0, int kIVFNumClusters = 0,
-          int kIVFNProbe = 0, size_t kIVFTrainSampleSize = 0>
+          int kIVFNProbe = 0, size_t kIVFTrainSampleSize = 0, bool kUsePMR = false>
 struct HNSWConfig {
   static constexpr int kDimVal = kDim;
   static constexpr bool kUseSIMDVal = kUseSIMD;
@@ -31,6 +31,7 @@ struct HNSWConfig {
   static constexpr int kIVFNumClustersVal = kIVFNumClusters;
   static constexpr int kIVFNProbeVal = kIVFNProbe;
   static constexpr size_t kIVFTrainSampleSizeVal = kIVFTrainSampleSize;
+  static constexpr bool kUsePMRVal = kUsePMR;
 
   static_assert(kDimVal > 0, "Dimension must be positive.");
   static_assert(kMVal > 0, "M must be positive.");

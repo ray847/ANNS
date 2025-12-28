@@ -39,7 +39,9 @@ using HNSWConfig100 = TunableHNSW::HNSWConfig<
     /*kPQSubquantizers=*/25,
     /*kPQTrainSampleSize=*/20000, // Sample 20k vectors for PQ training
     /*kIVFNumClusters=*/1024,
-    /*kIVFNProbe=*/10>;
+    /*kIVFNProbe=*/10,
+    /*kIVFTrainSampleSize=*/0,
+    /*kUsePMR=*/true>;
 
 // Configuration for 128-dimensional vectors (e.g., SIFT).
 using HNSWConfig128 = TunableHNSW::HNSWConfig<
@@ -56,7 +58,9 @@ using HNSWConfig128 = TunableHNSW::HNSWConfig<
     /*kPQSubquantizers=*/32,
     /*kPQTrainSampleSize=*/20000, // Sample 20k vectors for PQ training
     /*kIVFNumClusters=*/1024,
-    /*kIVFNProbe=*/10>;
+    /*kIVFNProbe=*/10,
+    /*kIVFTrainSampleSize=*/0,
+    /*kUsePMR=*/true>;
 
 class TunableHNSWSolution {
  private:

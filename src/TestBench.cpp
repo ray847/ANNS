@@ -68,7 +68,7 @@ std::vector<std::vector<size_t>> LoadLabelsFromFile(const global::DataSetInfo& i
 
 // Unified Loader
 LoadedDataset LoadDataset(const global::DataSetInfo& info) {
-    std::cout << "\n>>> Loading Dataset into RAM: " << info.name << " <<<" << std::endl;
+    std::cout << "\n>>> Loading Dataset into RAM: " << info.name << " <<<";
     LoadedDataset ds;
     ds.name = info.name;
     ds.dims = info.dims;
@@ -79,7 +79,7 @@ LoadedDataset LoadDataset(const global::DataSetInfo& info) {
     ds.samples = LoadSamplesFromFile(info);
     ds.labels = LoadLabelsFromFile(info);
     
-    std::cout << ">>> Load Complete. Memory Ready. <<<\n" << std::endl;
+    std::cout << ">>> Load Complete. Memory Ready. <<<\n";
     return ds;
 }
 
@@ -150,68 +150,50 @@ int main() {
   using TunableHNSW::QuantizationStrategy;
   using TunableHNSW::IndexStrategy;
 
-  // --- THE "PERFECT 6" RUNS ---
+  // --- SIFT Configurations (Dim 128) ---
+  using SIFT_DEFAULT = HNSWConfig<128, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 32, 64, 300, 100, 16>;
+  using SIFT_DYNAMIC = HNSWConfig<128, true, SearchStrategy::kDynamic, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 32, 64, 300, 150, 16, 75>;
+  using SIFT_PQ      = HNSWConfig<128, true, SearchStrategy::kStandard, QuantizationStrategy::kPQ, IndexStrategy::kHNSW, 32, 64, 300, 200, 16, 100, 16, 25000>;
+  using SIFT_OPQ     = HNSWConfig<128, true, SearchStrategy::kStandard, QuantizationStrategy::kOPQ, IndexStrategy::kHNSW, 32, 64, 300, 185, 16, 100, 16, 25000>;
+  using SIFT_SQ      = HNSWConfig<128, true, SearchStrategy::kStandard, QuantizationStrategy::kSQ, IndexStrategy::kHNSW, 32, 64, 300, 100, 16>;
+  using SIFT_IVF     = HNSWConfig<128, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kIVF_HNSW, 32, 64, 300, 150, 16, 100, 0, 0, 1024, 128, 25000>;
+  using SIFT_PMR     = HNSWConfig<128, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 32, 64, 300, 100, 16, 100, 0, 0, 0, 0, 0, true>;
 
-  // *** RUN 1 & 2: SIFT SHOWDOWN (Target: >99%) ***
-  // Goal: Prove that Dynamic Search maintains 99% recall faster than Standard.
-  
-  // 1. SIFT REFERENCE (Standard)
-  using SIFT_STD_99 = HNSWConfig<128, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 
-                                 32, 64, 500, 300, 16>;
+  // --- GloVe Configurations (Dim 100) ---
+  // M = 48, M0 = 96, EfConstruction = 600, EfSearch = 450, MaxLayers = 16
+  using GLOVE_DEFAULT = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 48, 96, 600, 400, 16>;
+  using GLOVE_DYNAMIC = HNSWConfig<100, true, SearchStrategy::kDynamic, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 48, 96, 600, 450, 16, 200>;
+  using GLOVE_PQ      = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kPQ, IndexStrategy::kHNSW, 48, 96, 600, 500, 16, 100, 20, 25000>;
+  using GLOVE_OPQ     = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kOPQ, IndexStrategy::kHNSW, 48, 96, 600, 500, 16, 100, 20, 25000>;
+  using GLOVE_SQ      = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kSQ, IndexStrategy::kHNSW, 48, 96, 600, 300, 16>;
+  using GLOVE_IVF     = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kIVF_HNSW, 48, 96, 600, 600, 16, 100, 0, 0, 1024, 256, 25000>;
+  using GLOVE_PMR     = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 48, 96, 600, 400, 16, 100, 0, 0, 0, 0, 0, true>;
 
-  // 2. SIFT CHALLENGER (Dynamic)
-  // Patience=100 ensures we don't drop below 99%.
-  using SIFT_DYN_99 = HNSWConfig<128, true, SearchStrategy::kDynamic, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 
-                                 32, 64, 500, 500, 16, 100>;
-
-
-  // *** RUN 3 & 4: THE "COST OF QUALITY" (GloVe) ***
-  // Goal: Show how much slower it is to go from 95% to 99% (The "Pareto Frontier").
-  
-  // 3. GLOVE BASELINE (Target: ~95%)
-  // Uses standard params (M=16). Good for comparison.
-  using GLOVE_STD_95 = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 
-                                  16, 32, 200, 300, 16>;
-
-  // 4. GLOVE HIGH ACCURACY (Target: >99%)
-  // Uses M=48 (Brute Force). Compare this time vs Run 3 to show the cost.
-  using GLOVE_STD_99 = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 
-                                  48, 96, 800, 1500, 16>;
-
-
-  // *** RUN 5 & 6: GLOVE STRATEGY BATTLE (Target: >99%) ***
-  // Goal: Can advanced algos beat the Brute Force approach of Run 4?
-  
-  // 5. GLOVE DYNAMIC (Target: >99%)
-  // Can we exit early on easy queries while hitting 99%?
-  using GLOVE_DYN_99 = HNSWConfig<100, true, SearchStrategy::kDynamic, QuantizationStrategy::kNone, IndexStrategy::kHNSW, 
-                                  48, 96, 800, 1600, 16, 150>;
-
-  // 6. GLOVE PQ + RERANK (Target: ~99%)
-  // Compresses graph to fit in cache, but reranks with float. 
-  // Fast graph traversal vs. expensive reranking step.
-  using GLOVE_PQ_99 = HNSWConfig<100, true, SearchStrategy::kStandard, QuantizationStrategy::kPQ, IndexStrategy::kHNSW, 
-                                 48, 96, 800, 1600, 16, 
-                                 100, 20, 25000>; // PQ specific params
-
-
-try {
-    // --- SIFT BATTLE ---
+  try {
+    // --- SIFT RUNS ---
     {
-        LoadedDataset siftData = LoadDataset(global::kSIFT_INFO);
+        LoadedDataset siftData = LoadDataset(global::kMINISIFT_INFO);
         std::cout << "=== SIFT RUNS (Target 99%) ===\n";
-        RunTest<SIFT_STD_99>(siftData, "[1] SIFT | Standard | 99% Reference");
-        RunTest<SIFT_DYN_99>(siftData, "[2] SIFT | Dynamic  | 99% Challenger");
+        //RunTest<SIFT_DEFAULT>(siftData, "[1] SIFT | Default HNSW");
+        //RunTest<SIFT_DYNAMIC>(siftData, "[2] SIFT | Dynamic Search");
+        //RunTest<SIFT_PQ>(siftData,      "[3] SIFT | PQ Enabled");
+        //RunTest<SIFT_OPQ>(siftData,     "[4] SIFT | OPQ Enabled");
+        //RunTest<SIFT_SQ>(siftData,      "[5] SIFT | SQ Enabled");
+        //RunTest<SIFT_IVF>(siftData,     "[6] SIFT | IVF Solution");
+        RunTest<SIFT_PMR>(siftData,     "[7] SIFT | PMR Enabled");
     }
 
-    // --- GLOVE BATTLE ---
+    // --- GLOVE RUNS ---
     {
-        LoadedDataset gloveData = LoadDataset(global::kGLOVE_INFO);
-        std::cout << "\n=== GLOVE RUNS (Cost & Strategy) ===\n";
-        RunTest<GLOVE_STD_95>(gloveData, "[3] GloVe | Standard | 95% Baseline");
-        RunTest<GLOVE_STD_99>(gloveData, "[4] GloVe | Standard | 99% High Accuracy (M=48)");
-        RunTest<GLOVE_DYN_99>(gloveData, "[5] GloVe | Dynamic  | 99% Optimization");
-        RunTest<GLOVE_PQ_99>(gloveData,  "[6] GloVe | PQ+Rerank| 99% Memory Opt");
+        LoadedDataset gloveData = LoadDataset(global::kMINIGLOVE_INFO);
+        std::cout << "\n=== GLOVE RUNS (Target 98%) ===\n";
+        //RunTest<GLOVE_DEFAULT>(gloveData, "[1] GloVe | Default HNSW");
+        //RunTest<GLOVE_DYNAMIC>(gloveData, "[2] GloVe | Dynamic Search");
+        //RunTest<GLOVE_PQ>(gloveData,      "[3] GloVe | PQ Enabled");
+        //RunTest<GLOVE_OPQ>(gloveData,     "[4] GloVe | OPQ Enabled");
+        //RunTest<GLOVE_SQ>(gloveData,      "[5] GloVe | SQ Enabled");
+        //RunTest<GLOVE_IVF>(gloveData,     "[6] GloVe | IVF Solution");
+        //RunTest<GLOVE_PMR>(gloveData,     "[7] GloVe | PMR Enabled");
     }
 
   } catch (const std::exception& e) {

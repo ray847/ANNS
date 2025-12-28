@@ -21,6 +21,7 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
+#include <memory_resource>
 #include <mutex>
 #include <optional>
 #include <queue>
@@ -33,6 +34,7 @@
 #include "Distance.h"
 #include "Metrics.h"
 #include "OPQ.h"
+#include "SQ.h"
 
 namespace TunableHNSW {
 
@@ -44,12 +46,25 @@ class HNSW {
       Config::kQuantizationVal == QuantizationStrategy::kPQ || Config::kQuantizationVal == QuantizationStrategy::kOPQ,
       OptimizedProductQuantizer<Config>,
       std::nullptr_t>;
+  using SQ = std::conditional_t<
+      Config::kQuantizationVal == QuantizationStrategy::kSQ,
+      ScalarQuantizer<Config::kDimVal>,
+      std::nullptr_t>;
 
   HNSW()
       : level_mult_(1.0 / std::log(1.0 * Config::kMVal)),
         metrics_() {
+    if constexpr (Config::kUsePMRVal) {
+      pmr_resource_.emplace();
+      nodes_ = Vector<Node>(&*pmr_resource_);
+      data_storage_ = Vector<float>(&*pmr_resource_);
+      pq_codes_ = Vector<uint8_t>(&*pmr_resource_);
+    }
     if constexpr (Config::kQuantizationVal == QuantizationStrategy::kPQ || Config::kQuantizationVal == QuantizationStrategy::kOPQ) {
       pq_.emplace();
+    }
+    if constexpr (Config::kQuantizationVal == QuantizationStrategy::kSQ) {
+      sq_.emplace();
     }
   }
 
@@ -60,7 +75,7 @@ class HNSW {
   }
 
   void Build(const std::vector<float>& base_data) {
-    data_storage_ = base_data;
+    data_storage_.assign(base_data.begin(), base_data.end());
     data_ptr_ = data_storage_.data();
     num_points_ = base_data.size() / Config::kDimVal;
     nodes_.resize(num_points_);
@@ -91,12 +106,27 @@ class HNSW {
       if constexpr (global::kDEBUG) {
           std::cout << "Product Quantizer training and encoding complete." << std::endl;
       }
+    } else if constexpr (Config::kQuantizationVal == QuantizationStrategy::kSQ) {
+      if constexpr (global::kDEBUG) {
+          std::cout << "Training Scalar Quantizer..." << std::endl;
+      }
+      sq_->Train(data_ptr_, num_points_);
+      pq_codes_.resize(num_points_ * Config::kDimVal * 2); // 2 bytes per dim
+      for (size_t i = 0; i < num_points_; ++i) {
+        sq_->Encode(data_ptr_ + i * Config::kDimVal,
+                    reinterpret_cast<uint16_t*>(pq_codes_.data() + i * Config::kDimVal * 2));
+      }
+      if constexpr (global::kDEBUG) {
+          std::cout << "Scalar Quantizer training and encoding complete." << std::endl;
+      }
     }
   }
 
   void Search(const std::vector<float>& query, int* result_indices) {
     if constexpr (Config::kQuantizationVal == QuantizationStrategy::kPQ || Config::kQuantizationVal == QuantizationStrategy::kOPQ) {
       SearchPQ_(query, result_indices);
+    } else if constexpr (Config::kQuantizationVal == QuantizationStrategy::kSQ) {
+      SearchSQ_(query, result_indices);
     } else {
       SearchFP_(query, result_indices);
     }
@@ -105,11 +135,31 @@ class HNSW {
   const HNSWMetrics<Config::kMaxLevelVal>& metrics() const { return metrics_; }
 
  private:
+  template <typename T>
+  using Vector = std::conditional_t<Config::kUsePMRVal, std::pmr::vector<T>, std::vector<T>>;
+
   struct Node {
+    using allocator_type = std::pmr::polymorphic_allocator<std::byte>;
     int level;
-    std::vector<int> flat_links;
-    std::vector<int> link_counts;
+    Vector<int> flat_links;
+    Vector<int> link_counts;
     std::unique_ptr<std::mutex> lock;
+
+    Node() = default;
+    Node(Node&&) = default;
+    Node& operator=(Node&&) = default;
+
+    template <typename Allocator>
+    Node(std::allocator_arg_t, const Allocator& alloc) : flat_links(alloc), link_counts(alloc) {}
+
+    template <typename Allocator>
+    Node(const Allocator& alloc) : flat_links(alloc), link_counts(alloc) {}
+
+    template <typename Allocator>
+    Node(Node&& other, const Allocator& alloc)
+        : flat_links(std::move(other.flat_links), alloc),
+          link_counts(std::move(other.link_counts), alloc),
+          lock(std::move(other.lock)) {}
   };
 
   struct VisitedList {
@@ -155,16 +205,19 @@ class HNSW {
   void AddConnection_(int source_node_id, int dest_node_id, int level);
   void SearchFP_(const std::vector<float>& query, int* result_indices);
   void SearchPQ_(const std::vector<float>& query, int* result_indices);
+  void SearchSQ_(const std::vector<float>& query, int* result_indices);
   void PrintMetricsReport_() const;
 
-  std::vector<float> data_storage_;
+  Vector<float> data_storage_;
   const float* data_ptr_ = nullptr;
   size_t num_points_ = 0;
 
   std::optional<PQ> pq_;
-  std::vector<uint8_t> pq_codes_;
+  std::optional<SQ> sq_;
+  Vector<uint8_t> pq_codes_; // Used for both PQ (1 byte) and SQ (2 bytes)
 
-  std::vector<Node> nodes_;
+  std::optional<std::pmr::monotonic_buffer_resource> pmr_resource_;
+  Vector<Node> nodes_;
   int entry_point_ = -1;
   int max_level_ = -1;
   double level_mult_;
@@ -395,6 +448,7 @@ void HNSW<Config>::SearchFP_(const std::vector<float>& query,
                              int* result_indices) {
   static thread_local VisitedList visited;
   if (visited.tags.size() != num_points_) visited.resize(num_points_);
+  metrics_.increment_search_count();
   const float* query_data = query.data();
   int entry_point = entry_point_;
   float current_dist = QueryDistSqFP_(query_data, entry_point);
@@ -550,6 +604,7 @@ void HNSW<Config>::SearchPQ_(const std::vector<float>& query,
                              int* result_indices) {
   static thread_local VisitedList visited;
   if (visited.tags.size() != num_points_) visited.resize(num_points_);
+  metrics_.increment_search_count();
 
   const float* query_data = query.data();
   auto dist_table = pq_->BuildDistanceTable(query_data);
@@ -668,13 +723,140 @@ void HNSW<Config>::SearchPQ_(const std::vector<float>& query,
 }
 
 template <typename Config>
+void HNSW<Config>::SearchSQ_(const std::vector<float>& query,
+                             int* result_indices) {
+  static thread_local VisitedList visited;
+  if (visited.tags.size() != num_points_) visited.resize(num_points_);
+  metrics_.increment_search_count();
+
+  const float* query_data = query.data();
+
+  auto query_dist_sq_sq = [&](int node_id) {
+    metrics_.increment_distance_calculations();
+    const uint16_t* code = reinterpret_cast<const uint16_t*>(
+        pq_codes_.data() + node_id * Config::kDimVal * 2);
+    return sq_->L2Sq(query_data, code);
+  };
+
+  int entry_point = entry_point_;
+  float current_dist = query_dist_sq_sq(entry_point);
+
+  // Phase 1: Upper Layers (Greedy Descent)
+  for (int level = max_level_; level > 0; --level) {
+    auto t_start_layer = std::chrono::high_resolution_clock::now();
+    bool changed = true;
+    while (changed) {
+      changed = false;
+      const Node& node = nodes_[entry_point];
+      if (level >= node.link_counts.size()) break;
+      int count = node.link_counts[level];
+      int offset = GetLinkOffset_(level);
+      const int* links = node.flat_links.data() + offset;
+      for (int i = 0; i < count; ++i) {
+        int neighbor = links[i];
+        float d = query_dist_sq_sq(neighbor);
+        if (d < current_dist) {
+          current_dist = d;
+          entry_point = neighbor;
+          changed = true;
+        }
+      }
+    }
+    auto t_end_layer = std::chrono::high_resolution_clock::now();
+    metrics_.add_navigation_time(
+        level, std::chrono::duration_cast<std::chrono::nanoseconds>(
+                   t_end_layer - t_start_layer)
+                   .count());
+  }
+
+  // Phase 2: Layer 0 (Fine-grained Search)
+  auto t_start_l0 = std::chrono::high_resolution_clock::now();
+  using QueueItem = std::pair<float, int>;
+  std::priority_queue<QueueItem> top_candidates;
+  std::priority_queue<QueueItem, std::vector<QueueItem>, std::greater<>>
+      candidates;
+  visited.advance();
+  candidates.push({current_dist, entry_point});
+  top_candidates.push({current_dist, entry_point});
+  visited.visit(entry_point);
+
+  while (!candidates.empty()) {
+    auto [c_dist, c_id] = candidates.top();
+    candidates.pop();
+    if (c_dist > top_candidates.top().first &&
+        top_candidates.size() >= Config::kEfSearchVal)
+      break;
+    const Node& node = nodes_[c_id];
+    int size = node.link_counts[0];
+    int offset = GetLinkOffset_(0);
+    const int* links = node.flat_links.data() + offset;
+    for (int i = 0; i < size; ++i) {
+      int neighbor_id = links[i];
+      if (!visited.visit(neighbor_id)) {
+        float d = query_dist_sq_sq(neighbor_id);
+        if (top_candidates.size() < Config::kEfSearchVal ||
+            d < top_candidates.top().first) {
+          candidates.push({d, neighbor_id});
+          top_candidates.push({d, neighbor_id});
+          if (top_candidates.size() > Config::kEfSearchVal)
+            top_candidates.pop();
+        }
+      }
+    }
+  }
+  auto t_end_l0 = std::chrono::high_resolution_clock::now();
+  metrics_.add_navigation_time(
+      0, std::chrono::duration_cast<std::chrono::nanoseconds>(t_end_l0 -
+                                                              t_start_l0)
+             .count());
+
+  // Reranking Step
+  std::vector<QueueItem> candidates_to_rerank;
+  candidates_to_rerank.reserve(top_candidates.size());
+  while (!top_candidates.empty()) {
+    candidates_to_rerank.push_back(top_candidates.top());
+    top_candidates.pop();
+  }
+
+  for (const auto& item : candidates_to_rerank) {
+    int candidate_id = item.second;
+    float exact_dist = QueryDistSqFP_(query_data, candidate_id);
+    if (top_candidates.size() < global::kCRITERION ||
+        exact_dist < top_candidates.top().first) {
+      top_candidates.push({exact_dist, candidate_id});
+      if (top_candidates.size() > global::kCRITERION) {
+        top_candidates.pop();
+      }
+    }
+  }
+
+  size_t k_idx = 0;
+  std::vector<QueueItem> sorted_results;
+  while (!top_candidates.empty()) {
+    sorted_results.push_back(top_candidates.top());
+    top_candidates.pop();
+  }
+  std::reverse(sorted_results.begin(), sorted_results.end());
+  for (const auto& p : sorted_results) {
+    if (k_idx >= global::kCRITERION) break;
+    result_indices[k_idx++] = p.second;
+  }
+  while (k_idx < global::kCRITERION) result_indices[k_idx++] = -1;
+}
+
+template <typename Config>
 void HNSW<Config>::PrintMetricsReport_() const {
   if constexpr (global::kDEBUG) {
     long long total_dist_calcs = metrics_.distance_calculations.load();
+    long long total_searches = metrics_.search_count.load();
+    double avg_dist_calcs = (total_searches > 0) ? (double)total_dist_calcs / total_searches : 0.0;
+
     std::cout << "\n======================================================\n";
     std::cout << "              TunableHNSW METRICS REPORT              \n";
     std::cout << "======================================================\n";
     std::cout << "Total Distance Calculations: " << total_dist_calcs << "\n";
+    std::cout << "Total Searches:              " << total_searches << "\n";
+    std::cout << "Avg Dist Calcs per Search:   " << std::fixed << std::setprecision(2) << avg_dist_calcs << "\n";
     std::cout << "------------------------------------------------------\n";
     std::cout << "Total Navigation Time per Layer (ns):\n";
     for (int l = max_level_; l >= 0; --l) {
@@ -689,4 +871,3 @@ void HNSW<Config>::PrintMetricsReport_() const {
 }
 
 }  // namespace TunableHNSW
-
