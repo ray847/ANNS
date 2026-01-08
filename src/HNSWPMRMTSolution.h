@@ -35,7 +35,7 @@ private:
 
   // [PMR] 1. Define the monotonic resource. 
   // It must be declared BEFORE nodes_ so it is destroyed AFTER nodes_.
-  std::pmr::monotonic_buffer_resource memory_pool_;
+  std::pmr::synchronized_pool_resource memory_pool_;
 
   struct Node {
     int level;

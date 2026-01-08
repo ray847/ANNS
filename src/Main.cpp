@@ -8,7 +8,7 @@
 
 #include "Global.h" // global::kDATA_SET_INFOS
 //#include "MySolution.h"
-#include "HNSWMTSolution.h"
+#include "HNSWBeamSearchMTSolution.h"
 //#include "NaiveSolution.h"
 
 /* Function Declarations */
@@ -17,8 +17,8 @@ void run(const global::DataSetInfo& dataset);
 /* Main Function */
 int main() {
   run(global::kMINISIFT_INFO);
-  //run(global::kMINIGLOVE_INFO);
-  //run(global::kSIFT_INFO);
+  run(global::kMINIGLOVE_INFO);
+  run(global::kSIFT_INFO);
   //run(global::kGLOVE_INFO);
   return 0;
 }

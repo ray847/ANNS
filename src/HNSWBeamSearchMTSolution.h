@@ -172,8 +172,8 @@ class Solution {
   // --- Hyperparameters ---
   static constexpr int kM = 64;
   static constexpr int kM0 = 128;
-  static constexpr int kEfConstruction = 600;
-  static constexpr int kEfSearch = 300;
+  static constexpr int kEfConstruction = 500;
+  static constexpr int kEfSearch = 250;
   static constexpr int kMaxLevel = 16;
 
   Solution() {
