@@ -3,3 +3,15 @@ build
 debug
 data_o
 tmp
+
+doc/main.aux
+doc/main.fdb_latexmk
+doc/main.log
+doc/main.synctex.gz
+doc/main.tex
+doc/main.toc
+doc/main.xdv
+
+cachegrind.*
+log*
+tmp*
