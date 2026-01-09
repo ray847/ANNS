@@ -1,292 +1,0 @@
-
->>> Loading Dataset into RAM: Sift <<<  [IO] Loading Base: data_o/sift/base.txt... Done.
-  [IO] Loading Queries: data_o/sift/sample.txt... Done.
-  [IO] Loading Labels: data_o/sift/label.txt... Done.
->>> Load Complete. Memory Ready. <<<
-=== SIFT RUNS (Target 99%) ===
-------------------------------------------------------------
-TEST: [1] SIFT | Default HNSW                      
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1000000 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Done.
-Searching...      Done.
-Build Time:       346.7078 s
-Avg Search Time:  0.7228 ms
-Recall@10:        0.9965
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 6424281309
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     28583791 ns
-  Layer  2:     66992337 ns
-  Layer  1:     84607702 ns
-  Layer  0:   6962040965 ns
-======================================================
-------------------------------------------------------------
-TEST: [2] SIFT | Dynamic Search                    
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1000000 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Done.
-Searching...      Done.
-Build Time:       340.8324 s
-Avg Search Time:  0.9666 ms
-Recall@10:        0.9965
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 6423977014
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     27125504 ns
-  Layer  2:     63623299 ns
-  Layer  1:     78030673 ns
-  Layer  0:   9409396331 ns
-======================================================
-------------------------------------------------------------
-TEST: [3] SIFT | PQ Enabled                        
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1000000 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Training Product Quantizer and encoding vectors...
-Product Quantizer training and encoding complete.
-Done.
-Searching...      Done.
-Build Time:       354.5556 s
-Avg Search Time:  0.5566 ms
-Recall@10:        0.9832
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 6425310507
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     20472624 ns
-  Layer  2:     45736297 ns
-  Layer  1:     55402175 ns
-  Layer  0:   4822754698 ns
-======================================================
-------------------------------------------------------------
-TEST: [4] SIFT | OPQ Enabled                       
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1000000 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Training Product Quantizer and encoding vectors...
-Product Quantizer training and encoding complete.
-Done.
-Searching...      Done.
-Build Time:       381.5196 s
-Avg Search Time:  0.5357 ms
-Recall@10:        0.9856
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 6425216333
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     20414692 ns
-  Layer  2:     42289559 ns
-  Layer  1:     53973429 ns
-  Layer  0:   4642662758 ns
-======================================================
-------------------------------------------------------------
-TEST: [5] SIFT | SQ Enabled                        
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1000000 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Training Scalar Quantizer...
-Scalar Quantizer training and encoding complete.
-Done.
-Searching...      Done.
-Build Time:       345.8608 s
-Avg Search Time:  2.5447 ms
-Recall@10:        0.9966
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 6425784215
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     75416052 ns
-  Layer  2:   3175204602 ns
-  Layer  1:    274522075 ns
-  Layer  0:  21242178226 ns
-======================================================
-------------------------------------------------------------
-TEST: [6] SIFT | IVF Solution                      
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1024 vectors...
-Building HNSW: 14%Building HNSW: 100%
-HNSW graph build complete.
-Done.
-Searching...      Done.
-Build Time:       10.3271 s
-Avg Search Time:  2.8168 ms
-Recall@10:        0.8496
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 2915036
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     11144140 ns
-  Layer  2:     15266498 ns
-  Layer  1:     21496238 ns
-  Layer  0:    585140761 ns
-======================================================
-------------------------------------------------------------
-TEST: [7] SIFT | PMR Enabled                       
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1000000 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Done.
-Searching...      Done.
-Build Time:       348.6421 s
-Avg Search Time:  0.8430 ms
-Recall@10:        0.9964
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 6424630279
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     34985961 ns
-  Layer  2:     81228655 ns
-  Layer  1:     99104062 ns
-  Layer  0:   8116064283 ns
-======================================================
-
->>> Loading Dataset into RAM: Glove <<<  [IO] Loading Base: data_o/glove/base.txt... Done.
-  [IO] Loading Queries: data_o/glove/sample.txt... Done.
-  [IO] Loading Labels: data_o/glove/label.txt... Done.
->>> Load Complete. Memory Ready. <<<
-
-=== GLOVE RUNS (Target 98%) ===
-------------------------------------------------------------
-TEST: [1] GloVe | Default HNSW                     
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1183514 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Done.
-Searching...      Done.
-Build Time:       2773.7831 s
-Avg Search Time:  3.6374 ms
-Recall@10:        0.9952
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 59531856878
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     29985402 ns
-  Layer  2:     72061537 ns
-  Layer  1:    115532514 ns
-  Layer  0:  35747906966 ns
-======================================================
-------------------------------------------------------------
-TEST: [2] GloVe | Dynamic Search                   
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1183514 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Done.
-Searching...      Done.
-Build Time:       4545.6660 s
-Avg Search Time:  2.3439 ms
-Recall@10:        0.9914
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 59457394695
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     24869984 ns
-  Layer  2:     64242677 ns
-  Layer  1:    103397326 ns
-  Layer  0:  22895297452 ns
-======================================================
-------------------------------------------------------------
-TEST: [3] GloVe | PQ Enabled                       
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1183514 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Training Product Quantizer and encoding vectors...
-Product Quantizer training and encoding complete.
-Done.
-Searching...      Done.
-Build Time:       6986.6825 s
-Avg Search Time:  4.2885 ms
-Recall@10:        0.9826
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 59540546766
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     31531468 ns
-  Layer  2:     72115315 ns
-  Layer  1:    117491894 ns
-  Layer  0:  41059305751 ns
-======================================================
-------------------------------------------------------------
-TEST: [4] GloVe | OPQ Enabled                      
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1183514 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%Building HNSW: 79%Building HNSW: 80%Building HNSW: 81%Building HNSW: 82%Building HNSW: 83%Building HNSW: 84%Building HNSW: 85%Building HNSW: 86%Building HNSW: 87%Building HNSW: 88%Building HNSW: 89%Building HNSW: 90%Building HNSW: 91%Building HNSW: 92%Building HNSW: 93%Building HNSW: 94%Building HNSW: 95%Building HNSW: 96%Building HNSW: 97%Building HNSW: 98%Building HNSW: 99%Building HNSW: 100%
-HNSW graph build complete.
-Training Product Quantizer and encoding vectors...
-Product Quantizer training and encoding complete.
-Done.
-Searching...      Done.
-Build Time:       2707.5009 s
-Avg Search Time:  3.9565 ms
-Recall@10:        0.9834
-
-
-======================================================
-              TunableHNSW METRICS REPORT              
-======================================================
-Total Distance Calculations: 59538085805
-------------------------------------------------------
-Total Navigation Time per Layer (ns):
-  Layer  3:     30073813 ns
-  Layer  2:     68162109 ns
-  Layer  1:    102122388 ns
-  Layer  0:  37853721900 ns
-======================================================
-------------------------------------------------------------
-TEST: [5] GloVe | SQ Enabled                       
-------------------------------------------------------------
-Building Index... Building HNSW graph for 1183514 vectors...
-Building HNSW: 1%Building HNSW: 2%Building HNSW: 3%Building HNSW: 4%Building HNSW: 5%Building HNSW: 6%Building HNSW: 7%Building HNSW: 8%Building HNSW: 9%Building HNSW: 10%Building HNSW: 11%Building HNSW: 12%Building HNSW: 13%Building HNSW: 14%Building HNSW: 15%Building HNSW: 16%Building HNSW: 17%Building HNSW: 18%Building HNSW: 19%Building HNSW: 20%Building HNSW: 21%Building HNSW: 22%Building HNSW: 23%Building HNSW: 24%Building HNSW: 25%Building HNSW: 26%Building HNSW: 27%Building HNSW: 28%Building HNSW: 29%Building HNSW: 30%Building HNSW: 31%Building HNSW: 32%Building HNSW: 33%Building HNSW: 34%Building HNSW: 35%Building HNSW: 36%Building HNSW: 37%Building HNSW: 38%Building HNSW: 39%Building HNSW: 40%Building HNSW: 41%Building HNSW: 42%Building HNSW: 43%Building HNSW: 44%Building HNSW: 45%Building HNSW: 46%Building HNSW: 47%Building HNSW: 48%Building HNSW: 49%Building HNSW: 50%Building HNSW: 51%Building HNSW: 52%Building HNSW: 53%Building HNSW: 54%Building HNSW: 55%Building HNSW: 56%Building HNSW: 57%Building HNSW: 58%Building HNSW: 59%Building HNSW: 60%Building HNSW: 61%Building HNSW: 62%Building HNSW: 63%Building HNSW: 64%Building HNSW: 65%Building HNSW: 66%Building HNSW: 67%Building HNSW: 68%Building HNSW: 69%Building HNSW: 70%Building HNSW: 71%Building HNSW: 72%Building HNSW: 73%Building HNSW: 74%Building HNSW: 75%Building HNSW: 76%Building HNSW: 77%Building HNSW: 78%
